@@ -1,10 +1,11 @@
 from functions_videos import rotate_frame
 from video_config import *
 # Replace with your cine file path
-cine_file_path = r"G:\Meth\T4\Shadow_Camera_3.cine"  
+cine_file_path = r"G:\Master_Thesis\BC20220627 - Heinzman DS300 - Mie Top view\Cine\T5\3.cine"  
 # Choose a specific frame (for example, frame number 10)
-frame_num = 100
+frame_num = 50
 gain = 10
+gamma = 0.5  # Adjust gamma correction factor as needed
 
 
 
@@ -216,6 +217,7 @@ if __name__ == "__main__":
 
     frame_RT = rotate_frame(frame_norm, rotation)
     frame_strip = gain*frame_RT[y_start:y_end, x_start:x_end]
+    frame_strip = frame_strip**gamma/4096**gamma  # Apply gamma correction
     
     # Launch the interactive masking GUI using the selected frame
     final_mask = masking_gui(frame_strip, "chamber_mask")
@@ -228,7 +230,7 @@ if __name__ == "__main__":
     # masked_img = cv2.bitwise_and(frame_norm, frame_norm, mask=loaded_mask_png.astype(np.uint8))
     
     # Display the resulting masked image
-    plt.figure()
+    # plt.figure()
     # plt.imshow(masked_img, cmap='gray')
-    plt.title("Frame with Loaded Mask Applied")
-    plt.show()
+    # plt.title("Frame with Loaded Mask Applied")
+    # plt.show()

@@ -43,7 +43,7 @@ def get_subfolder_names(parent_folder):
 
 
 
-def play_video_cv2(video, gain=1, binarize=False, thresh=0.5):
+def play_video_cv2(video, gain=1, binarize=False, thresh=0.5, intv=17):
     """
     Play a list/array of video frames with OpenCV, with optional binarization.
 
@@ -95,7 +95,7 @@ def play_video_cv2(video, gain=1, binarize=False, thresh=0.5):
         # 显示
         cv2.imshow('Frame', frame_uint8)
         # ~60fps 播放，按 'q' 退出
-        if cv2.waitKey(17) & 0xFF == ord('q'):
+        if cv2.waitKey(intv) & 0xFF == ord('q'):
             break
 
     cv2.destroyAllWindows()
@@ -256,6 +256,9 @@ def mask_video(video: np.ndarray, chamber_mask: np.ndarray) -> np.ndarray:
     # Ensure chamber_mask is boolean.
     chamber_mask_bool = chamber_mask if chamber_mask.dtype == bool else (chamber_mask > 0)
     # Use broadcasting: multiplies each frame elementwise with the mask.
+    if video.shape[1] != chamber_mask.shape[0] or video.shape[2] != chamber_mask.shape[1]:
+        chamber_mask_bool = cv2.resize(chamber_mask_bool.astype(np.uint8), (video.shape[2], video.shape[1]), interpolation=cv2.INTER_NEAREST)
+        # raise ValueError("Video dimensions and mask dimensions do not match.")
     return video * chamber_mask_bool
 
 
@@ -291,3 +294,23 @@ def rotate_video_auto(video_array, angle=0, max_workers=4):
     else:
         print("CUDA not available, falling back to CPU.")
         return rotate_video(video_array, angle=angle, max_workers=max_workers)
+
+
+def map_video_to_range(video):
+    """
+    Maps a video to a 2D image of its pixel intensity ranges.
+    """
+    # Assuming video is a 3D numpy array (frames, height, width)
+    # Calculate the min and max for each pixel across all frames
+    min_vals = np.min(video, axis=0)
+    max_vals = np.max(video, axis=0)
+
+    # Create a 2D image where each pixel's value is the range
+    range_map = abs(max_vals - min_vals)
+
+    # Normalize the range map to [0, 1] for visualization
+    # range_map_normalized = (range_map - np.min(range_map)) / (np.max(range_map) - np.min(range_map))
+
+    # return range_map_normalized
+
+    return range_map
