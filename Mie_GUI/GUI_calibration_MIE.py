@@ -1,8 +1,11 @@
+"""Small utility to browse frames within a Phantom ``.cine`` video."""
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
 import numpy as np
-import pycine.file as cine
+# from cine_utils import CineReader
+from cine_utils import *
 
 class FrameViewer:
     """Simple Tkinter widget to preview frames from a ``.cine`` file.
@@ -11,18 +14,15 @@ class FrameViewer:
     do not need to be fully loaded into memory.  Frames can be navigated
     using "Prev"/"Next" buttons or by entering a specific frame number.
     """
+
     def __init__(self, master):
         # Keep a reference to the root window so it doesn't get garbage-
         # collected.
         self.master = master
         master.title("Cine Frame Viewer")
 
-        # Video properties
-        self.path = None
-        self.frame_offsets = []
-        self.frame_count = 0
-        self.width = 0
-        self.height = 0
+        # Video reader and current frame index
+        self.reader = CineReader()
         self.current_index = 0
 
         self._build_ui(master)
@@ -65,7 +65,6 @@ class FrameViewer:
         self.img_label = ttk.Label(parent)
         self.img_label.pack(expand=True)
 
-
     def load_video(self):
         """Open a ``.cine`` file and initialise video properties."""
 
@@ -74,17 +73,11 @@ class FrameViewer:
             return
 
         try:
-            header = cine.read_header(path)
+            self.reader.load(path)
         except Exception as e:
             messagebox.showerror('Error', f'Failed to load video:\n{e}')
             return
 
-        # Cache properties for quick access while browsing
-        self.path = path
-        self.frame_offsets = header['pImage']
-        self.frame_count = len(self.frame_offsets)
-        self.width = header['bitmapinfoheader'].biWidth
-        self.height = header['bitmapinfoheader'].biHeight
         self.current_index = 0
 
         self.prev_btn.config(state=tk.NORMAL)
@@ -96,20 +89,8 @@ class FrameViewer:
     def read_current(self):
         """Read the current frame from disk and return a ``PIL.Image``."""
 
-        offset = self.frame_offsets[self.current_index]
+        frame = self.reader.read_frame(self.current_index)
 
-        # ``pycine`` gives the offset to a small per-frame header.  Skip
-        # those eight bytes so that we start at the pixel data.
-        with open(self.path, "rb") as f:
-            f.seek(offset)
-            f.read(8)
-            data = np.fromfile(f, dtype=np.uint16,
-                               count=self.width * self.height)
-
-        # Reshape the 1‑D array to 2‑D and flip vertically because Phantom
-        # stores rows bottom‑up.
-        frame = data.reshape(self.height, self.width)
-        frame = np.flipud(frame)
 
         # Convert to 8‑bit for display.  The ``/16`` maps the typical 12‑bit
         # sensor values into 0‑255 range.
@@ -119,7 +100,7 @@ class FrameViewer:
     def show_frame(self, idx):
         """Display the frame at ``idx`` if it exists."""
 
-        if 0 <= idx < self.frame_count:
+        if 0 <= idx < self.reader.frame_count:
             self.current_index = idx
 
             img = self.read_current()
@@ -127,9 +108,8 @@ class FrameViewer:
             self.img_label.config(image=self.photo)
 
             # Update status and entry field
-            self.info.config(text=f"Frame {idx + 1}/{self.frame_count}")
+            self.info.config(text=f"Frame {idx + 1}/{self.reader.frame_count}")
             self.frame_var.set(idx + 1)
-
 
     def prev_frame(self):
         """Show the previous frame if possible."""
@@ -140,14 +120,14 @@ class FrameViewer:
     def next_frame(self):
         """Show the next frame if possible."""
 
-        if self.current_index < self.frame_count - 1:
+        if self.current_index < self.reader.frame_count - 1:
             self.show_frame(self.current_index + 1)
 
     def goto_frame(self):
         """Jump to the frame specified in the entry box."""
 
         idx = self.frame_var.get() - 1
-        if 0 <= idx < self.frame_count:
+        if 0 <= idx < self.reader.frame_count:
             self.show_frame(idx)
         else:
             messagebox.showwarning('Out of range', 'Frame number out of range')
