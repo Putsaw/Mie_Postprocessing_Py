@@ -2,7 +2,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 from PIL import Image, ImageTk
 import numpy as np
-from functions_videos import load_cine_video
+
+from cine_utils import CineReader
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib.figure import Figure
@@ -23,8 +24,8 @@ class VideoAnnotatorUI:
             'confirm_btn': 12
         }
 
-        # Video & annotation data
-        self.video = np.zeros_like
+        # Video reader and annotation data
+        self.reader = CineReader()
         self.total_frames = 0
         self.current_index = 0
         self.zoom_factor = 1.0
@@ -130,13 +131,16 @@ class VideoAnnotatorUI:
 
     def load_video(self):
         path = filedialog.askopenfilename(filetypes=[('Cine','*.cine')])
-        if not path: return
-        try: vid = load_cine_video(path)
-        except Exception as e: messagebox.showerror('Error', f'Cannot load video:\n{e}'); return
-        self.video = vid.astype(np.float32)
-        self.total_frames = self.video.shape[0]
+        try:
+            self.reader.load(path)
+        except Exception as e:
+            messagebox.showerror('Error', f'Cannot load video:\n{e}')
+            return
+
+        self.total_frames = self.reader.frame_count
+        self.mask = np.zeros((self.reader.height, self.reader.width), dtype=np.uint8)
         self.current_index = 0
-        self.mask = np.zeros(self.video.shape[1:], dtype=np.uint8)
+        self.mask = np.zeros((self.reader.height, self.reader.width), dtype=np.uint8)
         for w in (self.prev_btn, self.next_btn, self.confirm_btn): w.config(state=tk.NORMAL)
         
         self.update_image()
@@ -150,7 +154,7 @@ class VideoAnnotatorUI:
             self.current_index+=1; self.mask = np.zeros_like(self.mask); self.update_image()
 
     def update_image(self):
-        frame = self.video[self.current_index]
+        frame = self.reader.read_frame(self.current_index).astype(np.float32)
         if self.mask is None or self.mask.shape != frame.shape:
             self.mask = np.zeros(frame.shape, dtype=np.uint8)
         g, gm, bl, wh = [self.vars[k].get() for k in ('gain','gamma','black','white')]
