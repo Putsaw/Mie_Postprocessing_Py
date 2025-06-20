@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 from PIL import Image, ImageTk
 import numpy as np
-
+from zoom_utils import enlarge_image
 from cine_utils import CineReader
 import matplotlib
 matplotlib.use('Agg')
@@ -28,7 +28,8 @@ class VideoAnnotatorUI:
         self.reader = CineReader()
         self.total_frames = 0
         self.current_index = 0
-        self.zoom_factor = 1.0
+        # Integer zoom factor for pixel-perfect scaling
+        self.zoom_factor = 1
         self.orig_img = np.zeros_like       # PIL Image after processing
         self.mask = np.zeros_like           # Full-frame mask (H×W)
 
@@ -171,17 +172,24 @@ class VideoAnnotatorUI:
     def _draw_scaled(self):
         base = self.orig_img.convert('RGBA')
         overlay = Image.new('RGBA', base.size, (*self.brush_color, self.alpha_var.get()))
-        mask_img = Image.fromarray((self.mask*255).astype(np.uint8)).convert('L')
-        composited = base.copy(); composited.paste(overlay,(0,0),mask_img)
-        w,h = composited.size; w2,h2=int(w*self.zoom_factor),int(h*self.zoom_factor)
-        comp2 = composited.resize((w2,h2),Image.NEAREST)
-        self.photo = ImageTk.PhotoImage(comp2); self.canvas.delete('IMG'); self.canvas.create_image(0,0,anchor='nw',image=self.photo,tags='IMG')
-        self.canvas.config(scrollregion=(0,0,w2,h2))
+        mask_img = Image.fromarray((self.mask * 255).astype(np.uint8)).convert('L')
 
-    def _on_zoom(self,event):
-        # delta=1.1 if getattr(event,'delta',0)>0 or getattr(event,'num',None)==4 else 0.9
-        delta=2 if getattr(event,'delta',0)>0 or getattr(event,'num',None)==4 else 0.5
-        self.zoom_factor=max(0.1,min(self.zoom_factor*delta,10)); self._draw_scaled()
+        composited = base.copy()
+        composited.paste(overlay, (0, 0), mask_img)
+
+        scaled = enlarge_image(composited, int(self.zoom_factor))
+        w2, h2 = scaled.size
+
+        self.photo = ImageTk.PhotoImage(scaled)
+        self.canvas.delete('IMG')
+        self.canvas.create_image(0, 0, anchor='nw', image=self.photo, tags='IMG')
+        self.canvas.config(scrollregion=(0, 0, w2, h2))
+
+    def _on_zoom(self, event):
+        """Zoom in or out in integer steps using the mouse wheel."""
+        direction = 1 if getattr(event, 'delta', 0) > 0 or getattr(event, 'num', None) == 4 else -1
+        self.zoom_factor = max(1, self.zoom_factor + direction)
+        self._draw_scaled()
 
     def _on_paint(self,event,paint=True):
         x=int(self.canvas.canvasx(event.x)/self.zoom_factor); y=int(self.canvas.canvasy(event.y)/self.zoom_factor)
