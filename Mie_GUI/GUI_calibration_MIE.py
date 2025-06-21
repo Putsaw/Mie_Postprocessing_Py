@@ -3,6 +3,8 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
+
+from zoom_utils import enlarge_image
 import numpy as np
 # from cine_utils import CineReader
 from cine_utils import *
@@ -24,6 +26,7 @@ class FrameViewer:
         # Video reader and current frame index
         self.reader = CineReader()
         self.current_index = 0
+        self.zoom_factor = 1
 
         self._build_ui(master)
 
@@ -61,9 +64,22 @@ class FrameViewer:
         self.info = ttk.Label(ctrl, text="No video loaded")
         self.info.grid(row=0, column=6, padx=(10, 0))
 
-        # Where the image is displayed
-        self.img_label = ttk.Label(parent)
-        self.img_label.pack(expand=True)
+        # Canvas with scrollbars for zoom/pan
+        cf = ttk.Frame(parent)
+        cf.pack(fill=tk.BOTH, expand=True)
+        self.canvas = tk.Canvas(cf, bg='black')
+        hbar = ttk.Scrollbar(cf, orient=tk.HORIZONTAL, command=self.canvas.xview)
+        vbar = ttk.Scrollbar(cf, orient=tk.VERTICAL,   command=self.canvas.yview)
+        self.canvas.configure(xscrollcommand=hbar.set, yscrollcommand=vbar.set)
+        self.canvas.grid(row=0, column=0, sticky='nsew')
+        hbar.grid(row=1, column=0, sticky='we')
+        vbar.grid(row=0, column=1, sticky='ns')
+        cf.rowconfigure(0, weight=1); cf.columnconfigure(0, weight=1)
+
+        # Zoom with mouse wheel
+        self.canvas.bind('<MouseWheel>', self._on_zoom)
+        self.canvas.bind('<Button-4>', self._on_zoom)
+        self.canvas.bind('<Button-5>', self._on_zoom)
 
     def load_video(self):
         """Open a ``.cine`` file and initialise video properties."""
@@ -79,6 +95,7 @@ class FrameViewer:
             return
 
         self.current_index = 0
+        self.zoom_factor = 1
 
         self.prev_btn.config(state=tk.NORMAL)
         self.next_btn.config(state=tk.NORMAL)
@@ -104,8 +121,11 @@ class FrameViewer:
             self.current_index = idx
 
             img = self.read_current()
+            img = enlarge_image(img, self.zoom_factor)
             self.photo = ImageTk.PhotoImage(img)
-            self.img_label.config(image=self.photo)
+            self.canvas.delete('IMG')
+            self.canvas.create_image(0, 0, anchor='nw', image=self.photo, tags='IMG')
+            self.canvas.config(scrollregion=(0, 0, img.width, img.height))
 
             # Update status and entry field
             self.info.config(text=f"Frame {idx + 1}/{self.reader.frame_count}")
@@ -122,6 +142,12 @@ class FrameViewer:
 
         if self.current_index < self.reader.frame_count - 1:
             self.show_frame(self.current_index + 1)
+
+    def _on_zoom(self, event):
+        """Zoom in or out in integer steps using the mouse wheel."""
+        direction = 1 if getattr(event, 'delta', 0) > 0 or getattr(event, 'num', None) == 4 else -1
+        self.zoom_factor = max(1, self.zoom_factor + direction)
+        self.show_frame(self.current_index)
 
     def goto_frame(self):
         """Jump to the frame specified in the entry box."""
