@@ -98,31 +98,48 @@ class FrameSelector(tk.Toplevel):
         self.parent.update_image()
         self.destroy()
         
-
+# ------------------------------------------------------------------
+#                         MAIN ANNOTATOR UI
+# ------------------------------------------------------------------
 class VideoAnnotatorUI:
     def __init__(self, master):
         self.master = master
         master.title("Cine Video Annotator")
+
+        # Layout grid positions (col indices)
         self.layout_positions = {
             'load_btn': 0, 'frame_label': 1, 'prev_btn': 2,
             'next_btn': 3, 'select_btn': 4,
             'param_start_col': 1, 'confirm_btn': 13
         }
+
+        # Video / data
         self.reader = CineReader()
         self.total_frames = 0
         self.current_index = 0
         self.zoom_factor = 1
-        self.orig_img = np.zeros_like
-        self.mask = np.zeros_like
+        self.orig_img = np.zeros_like  # placeholder for PIL Image
+        self.base_rgba = None          # RGBA cached base frame
+        # Offsets for panning within the zoomed image
+        self.offset_x = 0
+        self.offset_y = 0
+
+        self.mask = np.zeros_like      # H×W uint8 mask (0/1)
+        # Brush settings
         self.brush_color = (255, 0, 0)
-        self.base_rgba = None
-        self.scaled_base = None
         self.alpha_var = tk.IntVar(value=50)
         self.brush_shape = tk.StringVar(value='circle')
         self.brush_size = tk.IntVar(value=10)
+        # Processing params dictionary (gain, gamma, etc.)
         self.vars = {}
+
+        # Build UI
         self._build_controls(master)
         self._build_content(master)
+
+    # ------------------------------------------------------------------
+    #                           CONTROL BAR
+    # ------------------------------------------------------------------
 
     def _build_controls(self, parent):
         ctrl = ttk.Frame(parent)
@@ -174,33 +191,39 @@ class VideoAnnotatorUI:
         if color[0]:
             self.brush_color = tuple(map(int, color[0]))
 
+    # ------------------------------------------------------------------
+    #                       MAIN CONTENT AREA
+    # ------------------------------------------------------------------
     def _build_content(self, parent):
         content = ttk.Frame(parent)
         content.pack(fill=tk.BOTH, expand=True)
         content.rowconfigure(0, weight=1)
         content.columnconfigure(0, weight=1)
 
-        # Canvas + scrollbars
+        # Canvas with scrollbars
         cf = ttk.Frame(content)
         cf.grid(row=0, column=0, sticky='nsew')
         self.canvas = tk.Canvas(cf, bg='black')
-        self.hbar = ttk.Scrollbar(cf, orient=tk.HORIZONTAL, command=self.canvas.xview)
-        self.vbar = ttk.Scrollbar(cf, orient=tk.VERTICAL,   command=self.canvas.yview)
+        self.hbar = ttk.Scrollbar(cf, orient=tk.HORIZONTAL, command=self._scroll_x)
+        self.vbar = ttk.Scrollbar(cf, orient=tk.VERTICAL,   command=self._scroll_y)
         self.canvas.configure(xscrollcommand=self.hbar.set, yscrollcommand=self.vbar.set)
         self.canvas.grid(row=0, column=0, sticky='nsew')
         self.hbar.grid(row=1, column=0, sticky='we')
         self.vbar.grid(row=0, column=1, sticky='ns')
-        cf.rowconfigure(0, weight=1); cf.columnconfigure(0, weight=1)
+        cf.rowconfigure(0, weight=1)
+        cf.columnconfigure(0, weight=1)
 
-        # Histogram
+        # Histogram panel
         hf = ttk.Frame(content)
         hf.grid(row=0, column=1, sticky='ns', padx=5, pady=5)
-        hf.rowconfigure(0, weight=1); hf.columnconfigure(0, weight=1)
-        self.fig = Figure(figsize=(3,3)); self.ax = self.fig.add_subplot(111)
+        hf.rowconfigure(0, weight=1)
+        hf.columnconfigure(0, weight=1)
+        self.fig = Figure(figsize=(3, 3))
+        self.ax = self.fig.add_subplot(111)
         self.canvas_hist = FigureCanvasTkAgg(self.fig, master=hf)
         self.canvas_hist.get_tk_widget().grid(row=0, column=0, sticky='nsew')
 
-        # Bindings
+        # Canvas bindings
         self.canvas.bind('<MouseWheel>',    self._on_zoom)
         self.canvas.bind('<Button-4>',      self._on_zoom)
         self.canvas.bind('<Button-5>',      self._on_zoom)
@@ -208,7 +231,7 @@ class VideoAnnotatorUI:
         self.canvas.bind('<ButtonPress-1>', lambda e: self._on_paint(e, True))
         self.canvas.bind('<B3-Motion>',     lambda e: self._on_paint(e, False))
         self.canvas.bind('<ButtonPress-3>', lambda e: self._on_paint(e, False))
-
+        self.canvas.bind('<Configure>',     lambda e: self._draw_scaled())
     def load_video(self):
         path = filedialog.askopenfilename(filetypes=[('Cine','*.cine')])
         try:
@@ -246,7 +269,8 @@ class VideoAnnotatorUI:
             img8 = np.clip((img8-bl)*(255/(wh-bl)),0,255).astype(np.uint8)
         self.orig_img = Image.fromarray(img8)
         self.base_rgba = self.orig_img.convert('RGBA')
-        self._update_zoomed_base()
+        self.offset_x = 0
+        self.offset_y = 0
         self.ax.clear(); self.ax.hist(img8.ravel(),bins=256); self.ax.set_title('Processed Histogram'); self.canvas_hist.draw()
         self._draw_scaled(); self.frame_label.config(text=f"Frame: {self.current_index+1}/{self.total_frames}")
     
@@ -256,22 +280,57 @@ class VideoAnnotatorUI:
             self.scaled_base = enlarge_image(self.base_rgba, int(self.zoom_factor))
 
     def _draw_scaled(self):
-        """Redraw the canvas using cached zoomed base image."""
-        if self.scaled_base is None:
-            self._update_zoomed_base()
+        """Redraw the canvas showing only the visible zoomed region."""
 
-        mask_img = Image.fromarray((self.mask * 255).astype(np.uint8))
+        if self.base_rgba is None:
+            return
+
+        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
+        scaled_w = self.orig_img.width * self.zoom_factor
+        scaled_h = self.orig_img.height * self.zoom_factor
+
+        if cw <= 1 or ch <= 1:
+            # Canvas not yet properly sized; draw the whole image
+            cw, ch = scaled_w, scaled_h
+
+        x0s = int(self.canvas.canvasx(0))
+        y0s = int(self.canvas.canvasy(0))
+        x1s = min(x0s + cw, scaled_w)
+        y1s = min(y0s + ch, scaled_h)
+
+        if x1s <= x0s or y1s <= y0s:
+            x0s, y0s = 0, 0
+            x1s, y1s = scaled_w, scaled_h
+
+        x0 = x0s // self.zoom_factor
+        y0 = y0s // self.zoom_factor
+        x1 = int(np.ceil(x1s / self.zoom_factor))
+        y1 = int(np.ceil(y1s / self.zoom_factor))
+
+        base_tile = self.base_rgba.crop((x0, y0, x1, y1))
+        mask_tile = self.mask[y0:y1, x0:x1]
+
+        mask_img = Image.fromarray((mask_tile * 255).astype(np.uint8))
+        base_tile = enlarge_image(base_tile, int(self.zoom_factor))
         mask_img = enlarge_image(mask_img, int(self.zoom_factor)).convert('L')
-        overlay = Image.new('RGBA', mask_img.size, (*self.brush_color, self.alpha_var.get()))
 
-        composited = self.scaled_base.copy()
+        overlay = Image.new('RGBA', mask_img.size,
+                            (*self.brush_color, self.alpha_var.get()))
+        composited = base_tile.convert('RGBA')
         composited.paste(overlay, (0, 0), mask_img)
-        w2, h2 = composited.size
 
         self.photo = ImageTk.PhotoImage(composited)
         self.canvas.delete('IMG')
-        self.canvas.create_image(0, 0, anchor='nw', image=self.photo, tags='IMG')
-        self.canvas.config(scrollregion=(0, 0, w2, h2))
+        self.canvas.create_image(x0s, y0s, anchor='nw', image=self.photo, tags='IMG')
+        self.canvas.config(scrollregion=(0, 0, scaled_w, scaled_h))
+
+    def _scroll_x(self, *args):
+        self.canvas.xview(*args)
+        self._draw_scaled()
+
+    def _scroll_y(self, *args):
+        self.canvas.yview(*args)
+        self._draw_scaled()
 
     def _on_zoom(self, event):
         """Zoom in or out in integer steps using the mouse wheel."""
