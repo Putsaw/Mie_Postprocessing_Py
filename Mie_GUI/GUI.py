@@ -9,6 +9,96 @@ matplotlib.use('Agg')
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+class FrameSelector(tk.Toplevel):
+    """Simple viewer to pick a frame from the loaded video."""
+
+    def __init__(self, parent):
+        super().__init__(parent.master)
+        self.parent = parent
+        self.reader = parent.reader
+        self.current_index = parent.current_index
+        self.zoom_factor = 1
+
+        self.title("Select Frame")
+
+        self._build_ui()
+        self.show_frame(self.current_index)
+
+    def _build_ui(self):
+        ctrl = ttk.Frame(self)
+        ctrl.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+
+        self.prev_btn = ttk.Button(ctrl, text="Prev", command=self.prev_frame)
+        self.prev_btn.grid(row=0, column=0, padx=2)
+        self.next_btn = ttk.Button(ctrl, text="Next", command=self.next_frame)
+        self.next_btn.grid(row=0, column=1, padx=2)
+
+        ttk.Label(ctrl, text="Frame:").grid(row=0, column=2, padx=(10, 0))
+        self.frame_var = tk.IntVar(value=self.current_index + 1)
+        ttk.Entry(ctrl, textvariable=self.frame_var, width=6).grid(row=0, column=3)
+        ttk.Button(ctrl, text="Go", command=self.goto_frame).grid(row=0, column=4, padx=2)
+        ttk.Button(ctrl, text="Use Frame", command=self.use_frame).grid(row=0, column=5, padx=(10, 0))
+
+        self.info = ttk.Label(ctrl, text="")
+        self.info.grid(row=0, column=6, padx=5)
+
+        cf = ttk.Frame(self)
+        cf.pack(fill=tk.BOTH, expand=True)
+        self.canvas = tk.Canvas(cf, bg='black')
+        hbar = ttk.Scrollbar(cf, orient=tk.HORIZONTAL, command=self.canvas.xview)
+        vbar = ttk.Scrollbar(cf, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.canvas.configure(xscrollcommand=hbar.set, yscrollcommand=vbar.set)
+        self.canvas.grid(row=0, column=0, sticky='nsew')
+        hbar.grid(row=1, column=0, sticky='we')
+        vbar.grid(row=0, column=1, sticky='ns')
+        cf.rowconfigure(0, weight=1)
+        cf.columnconfigure(0, weight=1)
+
+        self.canvas.bind('<MouseWheel>', self._on_zoom)
+        self.canvas.bind('<Button-4>', self._on_zoom)
+        self.canvas.bind('<Button-5>', self._on_zoom)
+
+    def read_frame(self, idx):
+        frame = self.reader.read_frame(idx)
+        img8 = np.clip(frame / 16, 0, 255).astype(np.uint8)
+        return Image.fromarray(img8)
+
+    def show_frame(self, idx):
+        if 0 <= idx < self.reader.frame_count:
+            self.current_index = idx
+            img = enlarge_image(self.read_frame(idx), self.zoom_factor)
+            self.photo = ImageTk.PhotoImage(img)
+            self.canvas.delete('IMG')
+            self.canvas.create_image(0, 0, anchor='nw', image=self.photo, tags='IMG')
+            self.canvas.config(scrollregion=(0, 0, img.width, img.height))
+            self.info.config(text=f"Frame {idx + 1}/{self.reader.frame_count}")
+            self.frame_var.set(idx + 1)
+
+    def prev_frame(self):
+        if self.current_index > 0:
+            self.show_frame(self.current_index - 1)
+
+    def next_frame(self):
+        if self.current_index < self.reader.frame_count - 1:
+            self.show_frame(self.current_index + 1)
+
+    def goto_frame(self):
+        idx = self.frame_var.get() - 1
+        if 0 <= idx < self.reader.frame_count:
+            self.show_frame(idx)
+
+    def _on_zoom(self, event):
+        direction = 1 if getattr(event, 'delta', 0) > 0 or getattr(event, 'num', None) == 4 else -1
+        self.zoom_factor = max(1, self.zoom_factor + direction)
+        self.show_frame(self.current_index)
+
+    def use_frame(self):
+        self.parent.current_index = self.current_index
+        self.parent.mask = np.zeros_like(self.parent.mask)
+        self.parent.update_image()
+        self.destroy()
+        
+
 class VideoAnnotatorUI:
     def __init__(self, master):
         self.master = master
@@ -20,8 +110,9 @@ class VideoAnnotatorUI:
             'frame_label': 1,
             'prev_btn': 2,
             'next_btn': 3,
-            'param_start_col': 4,
-            'confirm_btn': 12
+            'select_btn': 4,
+            'param_start_col': 5,
+            'confirm_btn': 13
         }
 
         # Video reader and annotation data
@@ -64,6 +155,8 @@ class VideoAnnotatorUI:
         self.prev_btn.grid(row=0, column=lp['prev_btn'], padx=2)
         self.next_btn = ttk.Button(ctrl, text="Next Frame", command=self.next_frame, state=tk.DISABLED)
         self.next_btn.grid(row=0, column=lp['next_btn'], padx=2)
+        self.select_btn = ttk.Button(ctrl, text="Select Frame", command=self.open_frame_selector, state=tk.DISABLED)
+        self.select_btn.grid(row=0, column=lp['select_btn'], padx=2)
 
         # Display params
         self.vars = {}
@@ -142,8 +235,8 @@ class VideoAnnotatorUI:
         self.mask = np.zeros((self.reader.height, self.reader.width), dtype=np.uint8)
         self.current_index = 0
         self.mask = np.zeros((self.reader.height, self.reader.width), dtype=np.uint8)
-        for w in (self.prev_btn, self.next_btn, self.confirm_btn): w.config(state=tk.NORMAL)
-        
+        for w in (self.prev_btn, self.next_btn, self.confirm_btn, self.select_btn):
+            w.config(state=tk.NORMAL)
         self.update_image()
 
     def prev_frame(self):
@@ -211,6 +304,11 @@ class VideoAnnotatorUI:
             self.mask = np.zeros_like(self.mask)
             self.update_image()
 
+    def open_frame_selector(self):
+        """Open a dialog to choose a frame visually."""
+        if self.total_frames:
+            FrameSelector(self)
+            
 if __name__=='__main__':
     root=tk.Tk(); app=VideoAnnotatorUI(root); root.mainloop()
 
