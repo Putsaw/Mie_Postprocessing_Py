@@ -2,6 +2,7 @@
 
 from PIL import Image
 import numpy as np
+from cv2 import resize, INTER_NEAREST
 
 
 def enlarge_image(img: Image.Image, factor: int) -> Image.Image:
@@ -19,5 +20,7 @@ def enlarge_image(img: Image.Image, factor: int) -> Image.Image:
         return img
     arr = np.array(img)
     # Repeat pixels along both axes to create a tiled effect
-    arr = arr.repeat(factor, axis=0).repeat(factor, axis=1)
+    # arr = arr.repeat(factor, axis=0).repeat(factor, axis=1)
+    arr = resize(arr, None, fx=factor, fy=factor, interpolation=INTER_NEAREST)
+
     return Image.fromarray(arr, mode=img.mode)
