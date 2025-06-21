@@ -103,37 +103,22 @@ class VideoAnnotatorUI:
     def __init__(self, master):
         self.master = master
         master.title("Cine Video Annotator")
-
-        # Layout parameters
         self.layout_positions = {
-            'load_btn': 0,
-            'frame_label': 1,
-            'prev_btn': 2,
-            'next_btn': 3,
-            'select_btn': 4,
-            'param_start_col': 5,
-            'confirm_btn': 13
+            'load_btn': 0, 'frame_label': 1, 'prev_btn': 2,
+            'next_btn': 3, 'select_btn': 4,
+            'param_start_col': 1, 'confirm_btn': 13
         }
-
-        # Video reader and annotation data
         self.reader = CineReader()
         self.total_frames = 0
         self.current_index = 0
-        # Integer zoom factor for pixel-perfect scaling
         self.zoom_factor = 1
-        self.orig_img = np.zeros_like       # PIL Image after processing
-        self.mask = np.zeros_like           # Full-frame mask (H×W)
-
-        # Paint settings
-        self.brush_color = (255, 0, 0)  # default red
-        # Alpha controlled by GUI
+        self.orig_img = np.zeros_like
+        self.mask = np.zeros_like
+        self.brush_color = (255, 0, 0)
         self.alpha_var = tk.IntVar(value=50)
-
-        # Brush controls
         self.brush_shape = tk.StringVar(value='circle')
-        self.brush_size = tk.IntVar(value=20)
-
-        # Build interface
+        self.brush_size = tk.IntVar(value=10)
+        self.vars = {}
         self._build_controls(master)
         self._build_content(master)
 
@@ -142,7 +127,7 @@ class VideoAnnotatorUI:
         ctrl.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
         lp = self.layout_positions
 
-        # Load / navigation
+        # Row 0: Load / navigation controls
         self.load_btn = ttk.Button(ctrl, text="Load Video", command=self.load_video)
         self.load_btn.grid(row=0, column=lp['load_btn'], padx=2)
         self.frame_label = ttk.Label(ctrl, text="Frame: 0/0")
@@ -150,7 +135,6 @@ class VideoAnnotatorUI:
         self.frame_entry = tk.IntVar(value=1)
         ttk.Entry(ctrl, textvariable=self.frame_entry, width=5).grid(row=0, column=lp['frame_label']+1)
         ttk.Button(ctrl, text="Go", command=self._on_go_frame).grid(row=0, column=lp['frame_label']+2)
-
         self.prev_btn = ttk.Button(ctrl, text="Prev Frame", command=self.prev_frame, state=tk.DISABLED)
         self.prev_btn.grid(row=0, column=lp['prev_btn'], padx=2)
         self.next_btn = ttk.Button(ctrl, text="Next Frame", command=self.next_frame, state=tk.DISABLED)
@@ -158,30 +142,30 @@ class VideoAnnotatorUI:
         self.select_btn = ttk.Button(ctrl, text="Select Frame", command=self.open_frame_selector, state=tk.DISABLED)
         self.select_btn.grid(row=0, column=lp['select_btn'], padx=2)
 
-        # Display params
-        self.vars = {}
+        # Row 1: Gain/Gamma/Black/White + Apply
         for i,name in enumerate(["Gain","Gamma","Black","White"]):
-            ttk.Label(ctrl, text=f"{name}:").grid(row=0, column=lp['param_start_col']+i*2)
+            ttk.Label(ctrl, text=f"{name}:").grid(
+                row=1, column=lp['param_start_col']+i*2, pady=(5,0))
             v = tk.DoubleVar(value=1.0 if name in ("Gain","Gamma") else 0.0)
-            ttk.Entry(ctrl, textvariable=v, width=5).grid(row=0, column=lp['param_start_col']+i*2+1)
+            ttk.Entry(ctrl, textvariable=v, width=5).grid(
+                row=1, column=lp['param_start_col']+i*2+1, pady=(5,0))
             self.vars[name.lower()] = v
-
-        # Apply
         self.confirm_btn = ttk.Button(ctrl, text="Apply", command=self.update_image, state=tk.DISABLED)
-        self.confirm_btn.grid(row=0, column=lp['confirm_btn'], padx=5)
+        self.confirm_btn.grid(row=1, column=lp['confirm_btn'], padx=5, pady=(5,0))
 
-        # Paint controls on second row
+        # Row 2: Brush controls
         bc = lp['param_start_col']
-        ttk.Label(ctrl, text="Brush:").grid(row=1, column=bc, pady=(5,0))
-        ttk.Combobox(ctrl, textvariable=self.brush_shape, values=['circle','square'], width=10).grid(row=1, column=bc+1, pady=(5,0))
-        ttk.Label(ctrl, text="Size:").grid(row=1, column=bc+4, pady=(5,0))
-        ttk.Entry(ctrl, textvariable=self.brush_size, width=5).grid(row=1, column=bc+5, pady=(5,0))
-        # Color chooser
-        ttk.Button(ctrl, text="Color", command=self.choose_color).grid(row=1, column=bc+7, padx=(10,0), pady=(5,0))
-        # Alpha slider
-        ttk.Label(ctrl, text="Alpha:").grid(row=1, column=bc+8, pady=(5,0))
-        tk.Scale(ctrl, from_=0, to=255, orient=tk.HORIZONTAL, variable=self.alpha_var, length=100).grid(
-            row=1, column=bc+9, pady=(5,0), sticky='w')
+        ttk.Label(ctrl, text="Brush:").grid(row=2, column=bc, pady=(5,0))
+        ttk.Combobox(ctrl, textvariable=self.brush_shape, values=['circle','square'], width=10)\
+            .grid(row=2, column=bc+1, pady=(5,0))
+        ttk.Label(ctrl, text="Size:").grid(row=2, column=bc+4, pady=(5,0))
+        ttk.Entry(ctrl, textvariable=self.brush_size, width=5).grid(row=2, column=bc+5, pady=(5,0))
+        ttk.Button(ctrl, text="Color", command=self.choose_color)\
+            .grid(row=2, column=bc+7, padx=(10,0), pady=(5,0))
+        ttk.Label(ctrl, text="Alpha:").grid(row=2, column=bc+8, pady=(5,0))
+        tk.Scale(ctrl, from_=0, to=255, orient=tk.HORIZONTAL,
+                 variable=self.alpha_var, length=100).grid(
+            row=2, column=bc+9, pady=(5,0), sticky='w')
 
     def choose_color(self):
         color = colorchooser.askcolor(color='#%02x%02x%02x' % self.brush_color, title='Select brush color')
@@ -308,7 +292,7 @@ class VideoAnnotatorUI:
         """Open a dialog to choose a frame visually."""
         if self.total_frames:
             FrameSelector(self)
-            
+
 if __name__=='__main__':
     root=tk.Tk(); app=VideoAnnotatorUI(root); root.mainloop()
 
