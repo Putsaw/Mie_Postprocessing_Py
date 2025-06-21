@@ -115,6 +115,8 @@ class VideoAnnotatorUI:
         self.orig_img = np.zeros_like
         self.mask = np.zeros_like
         self.brush_color = (255, 0, 0)
+        self.base_rgba = None
+        self.scaled_base = None
         self.alpha_var = tk.IntVar(value=50)
         self.brush_shape = tk.StringVar(value='circle')
         self.brush_size = tk.IntVar(value=10)
@@ -243,21 +245,30 @@ class VideoAnnotatorUI:
         if wh>bl and bl>=0:
             img8 = np.clip((img8-bl)*(255/(wh-bl)),0,255).astype(np.uint8)
         self.orig_img = Image.fromarray(img8)
+        self.base_rgba = self.orig_img.convert('RGBA')
+        self._update_zoomed_base()
         self.ax.clear(); self.ax.hist(img8.ravel(),bins=256); self.ax.set_title('Processed Histogram'); self.canvas_hist.draw()
         self._draw_scaled(); self.frame_label.config(text=f"Frame: {self.current_index+1}/{self.total_frames}")
+    
+    def _update_zoomed_base(self):
+        """Cache a zoomed version of the base image for faster drawing."""
+        if self.base_rgba is not None:
+            self.scaled_base = enlarge_image(self.base_rgba, int(self.zoom_factor))
 
     def _draw_scaled(self):
-        base = self.orig_img.convert('RGBA')
-        overlay = Image.new('RGBA', base.size, (*self.brush_color, self.alpha_var.get()))
-        mask_img = Image.fromarray((self.mask * 255).astype(np.uint8)).convert('L')
+        """Redraw the canvas using cached zoomed base image."""
+        if self.scaled_base is None:
+            self._update_zoomed_base()
 
-        composited = base.copy()
+        mask_img = Image.fromarray((self.mask * 255).astype(np.uint8))
+        mask_img = enlarge_image(mask_img, int(self.zoom_factor)).convert('L')
+        overlay = Image.new('RGBA', mask_img.size, (*self.brush_color, self.alpha_var.get()))
+
+        composited = self.scaled_base.copy()
         composited.paste(overlay, (0, 0), mask_img)
+        w2, h2 = composited.size
 
-        scaled = enlarge_image(composited, int(self.zoom_factor))
-        w2, h2 = scaled.size
-
-        self.photo = ImageTk.PhotoImage(scaled)
+        self.photo = ImageTk.PhotoImage(composited)
         self.canvas.delete('IMG')
         self.canvas.create_image(0, 0, anchor='nw', image=self.photo, tags='IMG')
         self.canvas.config(scrollregion=(0, 0, w2, h2))
@@ -266,6 +277,7 @@ class VideoAnnotatorUI:
         """Zoom in or out in integer steps using the mouse wheel."""
         direction = 1 if getattr(event, 'delta', 0) > 0 or getattr(event, 'num', None) == 4 else -1
         self.zoom_factor = max(1, self.zoom_factor + direction)
+        self._update_zoomed_base()
         self._draw_scaled()
 
     def _on_paint(self,event,paint=True):
