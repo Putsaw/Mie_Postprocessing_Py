@@ -1,7 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps
 import numpy as np
+import os
 from zoom_utils import enlarge_image
 from cine_utils import CineReader
 import matplotlib
@@ -120,6 +121,7 @@ class VideoAnnotatorUI:
         self.zoom_factor = 1
         self.orig_img = np.zeros_like  # placeholder for PIL Image
         self.base_rgba = None          # RGBA cached base frame
+        self.display_pad = 1           # extra border for visualization
         # Offsets for panning within the zoomed image
         self.offset_x = 0
         self.offset_y = 0
@@ -160,6 +162,9 @@ class VideoAnnotatorUI:
         self.next_btn.grid(row=0, column=lp['next_btn'], padx=2)
         self.select_btn = ttk.Button(ctrl, text="Select Frame", command=self.open_frame_selector, state=tk.DISABLED)
         self.select_btn.grid(row=0, column=lp['select_btn'], padx=2)
+        self.export_btn = ttk.Button(ctrl, text="Export Mask", command=self.export_mask, state=tk.DISABLED)
+        self.export_btn.grid(row=0, column=lp['select_btn']+1, padx=2)
+
 
         # Row 1: Gain/Gamma/Black/White + Apply
         for i,name in enumerate(["Gain","Gamma","Black","White"]):
@@ -243,8 +248,8 @@ class VideoAnnotatorUI:
         self.total_frames = self.reader.frame_count
         self.mask = np.zeros((self.reader.height, self.reader.width), dtype=np.uint8)
         self.current_index = 0
-        self.mask = np.zeros((self.reader.height, self.reader.width), dtype=np.uint8)
-        for w in (self.prev_btn, self.next_btn, self.confirm_btn, self.select_btn):
+        self.mask = np.zeros((self.reader.height, self.reader.width), dtype=np.uint8)            
+        for w in (self.prev_btn, self.next_btn, self.confirm_btn, self.select_btn, self.export_btn):
             w.config(state=tk.NORMAL)
         self.update_image()
 
@@ -269,6 +274,10 @@ class VideoAnnotatorUI:
             img8 = np.clip((img8-bl)*(255/(wh-bl)),0,255).astype(np.uint8)
         self.orig_img = Image.fromarray(img8)
         self.base_rgba = self.orig_img.convert('RGBA')
+        self.base_rgba_pad = ImageOps.expand(
+            self.base_rgba,
+            border=(0, 0, self.display_pad, self.display_pad),
+            fill=(0, 0, 0, 255))
         self.offset_x = 0
         self.offset_y = 0
         self.ax.clear(); self.ax.hist(img8.ravel(),bins=256); self.ax.set_title('Processed Histogram'); self.canvas_hist.draw()
@@ -277,7 +286,7 @@ class VideoAnnotatorUI:
     def _update_zoomed_base(self):
         """Cache a zoomed version of the base image for faster drawing."""
         if self.base_rgba is not None:
-            self.scaled_base = enlarge_image(self.base_rgba, int(self.zoom_factor))
+            self.scaled_base = enlarge_image(self.base_rgba_pad, int(self.zoom_factor))
 
     def _draw_scaled(self):
         """Redraw the canvas showing only the visible zoomed region."""
@@ -286,8 +295,8 @@ class VideoAnnotatorUI:
             return
 
         cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
-        scaled_w = self.orig_img.width * self.zoom_factor
-        scaled_h = self.orig_img.height * self.zoom_factor
+        scaled_w = (self.orig_img.width + self.display_pad) * self.zoom_factor
+        scaled_h = (self.orig_img.height + self.display_pad) * self.zoom_factor
 
         if cw <= 1 or ch <= 1:
             # Canvas not yet properly sized; draw the whole image
@@ -307,8 +316,9 @@ class VideoAnnotatorUI:
         x1 = int(np.ceil(x1s / self.zoom_factor))
         y1 = int(np.ceil(y1s / self.zoom_factor))
 
-        base_tile = self.base_rgba.crop((x0, y0, x1, y1))
-        mask_tile = self.mask[y0:y1, x0:x1]
+        base_tile = self.base_rgba_pad.crop((x0, y0, x1, y1))
+        mask_pad = np.pad(self.mask, ((0, self.display_pad), (0, self.display_pad)), constant_values=0)
+        mask_tile = mask_pad[y0:y1, x0:x1]
 
         mask_img = Image.fromarray((mask_tile * 255).astype(np.uint8))
         base_tile = enlarge_image(base_tile, int(self.zoom_factor))
@@ -343,7 +353,8 @@ class VideoAnnotatorUI:
         x=int(self.canvas.canvasx(event.x)/self.zoom_factor)
         y=int(self.canvas.canvasy(event.y)/self.zoom_factor)
         x=max(0, min(x, self.mask.shape[1]-1))
-        y=max(0, min(y, self.mask.shape[0]-1))        
+        y=max(0, min(y, self.mask.shape[0]-1))
+        
         size=self.brush_size.get()
         if self.brush_shape.get()=='circle':
             yy,xx=np.ogrid[-y:self.mask.shape[0]-y, -x:self.mask.shape[1]-x]; mask_area = xx*xx+yy*yy<=size*size
@@ -366,6 +377,20 @@ class VideoAnnotatorUI:
         """Open a dialog to choose a frame visually."""
         if self.total_frames:
             FrameSelector(self)
+    
+    def export_mask(self):
+        """Save the current mask as .npy and .jpg"""
+        if self.total_frames == 0:
+            messagebox.showerror('Error', 'No video loaded')
+            return
+        file_path = filedialog.asksaveasfilename(defaultextension='.npy',
+                                                 filetypes=[('NumPy file','*.npy')])
+        if not file_path:
+            return
+        np.save(file_path, self.mask)
+        img = Image.fromarray((self.mask * 255).astype(np.uint8))
+        img.save(os.path.splitext(file_path)[0] + '.jpg')
+        messagebox.showinfo('Export', 'Mask exported')
 
 if __name__=='__main__':
     root=tk.Tk(); app=VideoAnnotatorUI(root); root.mainloop()
