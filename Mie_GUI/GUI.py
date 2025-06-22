@@ -5,6 +5,7 @@ import numpy as np
 import os
 from zoom_utils import enlarge_image
 from cine_utils import CineReader
+from circ_calculator import calc_circle
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib.figure import Figure
@@ -95,10 +96,63 @@ class FrameSelector(tk.Toplevel):
 
     def use_frame(self):
         self.parent.current_index = self.current_index
-        self.parent.mask = np.zeros_like(self.parent.mask)
         self.parent.update_image()
         self.destroy()
         
+class CircleSelector(tk.Toplevel):
+    """Window to pick three points and compute a circle."""
+
+    def __init__(self, parent):
+        super().__init__(parent.master)
+        self.parent = parent
+        self.reader = parent.reader
+        self.current_index = parent.current_index
+        self.zoom_factor = 1
+        self.points = []
+
+        self.title("Select Circle")
+
+        self.canvas = tk.Canvas(self, bg='black')
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.canvas.bind('<Button-1>', self._on_click)
+        self.canvas.bind('<MouseWheel>', self._on_zoom)
+        self.canvas.bind('<Button-4>', self._on_zoom)
+        self.canvas.bind('<Button-5>', self._on_zoom)
+
+        self.show_frame()
+
+    def read_frame(self, idx):
+        frame = self.reader.read_frame(idx)
+        img8 = np.clip(frame / 16, 0, 255).astype(np.uint8)
+        return Image.fromarray(img8)
+
+    def show_frame(self):
+        img = enlarge_image(self.read_frame(self.current_index), self.zoom_factor)
+        self.photo = ImageTk.PhotoImage(img)
+        self.canvas.delete('all')
+        self.canvas.create_image(0, 0, anchor='nw', image=self.photo)
+        self.canvas.config(scrollregion=(0, 0, self.photo.width(), self.photo.height()))
+
+    def _on_zoom(self, event):
+        direction = 1 if getattr(event, 'delta', 0) > 0 or getattr(event, 'num', None) == 4 else -1
+        self.zoom_factor = max(1, self.zoom_factor + direction)
+        self.show_frame()
+
+    def _on_click(self, event):
+        x = int(self.canvas.canvasx(event.x) / self.zoom_factor)
+        y = int(self.canvas.canvasy(event.y) / self.zoom_factor)
+        self.points.append((x, y))
+        r = 3
+        self.canvas.create_oval(event.x - r, event.y - r, event.x + r, event.y + r, outline='red')
+        if len(self.points) == 3:
+            center, radius = calc_circle(*self.points)
+            print(f"Circle radius: {radius}")
+            self.parent.coord_x.set(int(center[0]))
+            self.parent.coord_y.set(int(center[1]))
+            self.parent._draw_scaled()
+            self.destroy()
+
+
 # ------------------------------------------------------------------
 #                         MAIN ANNOTATOR UI
 # ------------------------------------------------------------------
@@ -121,7 +175,7 @@ class VideoAnnotatorUI:
         self.zoom_factor = 1
         self.orig_img = np.zeros_like  # placeholder for PIL Image
         self.base_rgba = None          # RGBA cached base frame
-        self.display_pad = 1           # extra border for visualization
+        self.display_pad = 100           # extra border for visualization
         # Offsets for panning within the zoomed image
         self.offset_x = 0
         self.offset_y = 0
@@ -129,9 +183,12 @@ class VideoAnnotatorUI:
         self.mask = np.zeros_like      # H×W uint8 mask (0/1)
         # Brush settings
         self.brush_color = (255, 0, 0)
-        self.alpha_var = tk.IntVar(value=50)
+        self.alpha_var = tk.IntVar(value=255)
         self.brush_shape = tk.StringVar(value='circle')
         self.brush_size = tk.IntVar(value=10)
+        self.show_mask = tk.BooleanVar(value=True)
+        self.coord_x = tk.IntVar(value=0)
+        self.coord_y = tk.IntVar(value=0)
         # Processing params dictionary (gain, gamma, etc.)
         self.vars = {}
 
@@ -164,7 +221,8 @@ class VideoAnnotatorUI:
         self.select_btn.grid(row=0, column=lp['select_btn'], padx=2)
         self.export_btn = ttk.Button(ctrl, text="Export Mask", command=self.export_mask, state=tk.DISABLED)
         self.export_btn.grid(row=0, column=lp['select_btn']+1, padx=2)
-
+        self.circle_btn = ttk.Button(ctrl, text="Circle", command=self.open_circle_selector, state=tk.DISABLED)
+        self.circle_btn.grid(row=0, column=lp['select_btn']+2, padx=2)
 
         # Row 1: Gain/Gamma/Black/White + Apply
         for i,name in enumerate(["Gain","Gamma","Black","White"]):
@@ -174,6 +232,10 @@ class VideoAnnotatorUI:
             ttk.Entry(ctrl, textvariable=v, width=5).grid(
                 row=1, column=lp['param_start_col']+i*2+1, pady=(5,0))
             self.vars[name.lower()] = v
+        ttk.Label(ctrl, text="X:").grid(row=1, column=lp['param_start_col']+8, pady=(5,0))
+        ttk.Entry(ctrl, textvariable=self.coord_x, width=5).grid(row=1, column=lp['param_start_col']+9, pady=(5,0))
+        ttk.Label(ctrl, text="Y:").grid(row=1, column=lp['param_start_col']+10, pady=(5,0))
+        ttk.Entry(ctrl, textvariable=self.coord_y, width=5).grid(row=1, column=lp['param_start_col']+11, pady=(5,0))
         self.confirm_btn = ttk.Button(ctrl, text="Apply", command=self.update_image, state=tk.DISABLED)
         self.confirm_btn.grid(row=1, column=lp['confirm_btn'], padx=5, pady=(5,0))
 
@@ -182,6 +244,7 @@ class VideoAnnotatorUI:
         ttk.Label(ctrl, text="Brush:").grid(row=2, column=bc, pady=(5,0))
         ttk.Combobox(ctrl, textvariable=self.brush_shape, values=['circle','square'], width=10)\
             .grid(row=2, column=bc+1, pady=(5,0))
+        ttk.Checkbutton(ctrl, text="Show Mask", variable=self.show_mask, command=self._draw_scaled).grid(row=2, column=bc+3, pady=(5,0))
         ttk.Label(ctrl, text="Size:").grid(row=2, column=bc+4, pady=(5,0))
         ttk.Entry(ctrl, textvariable=self.brush_size, width=5).grid(row=2, column=bc+5, pady=(5,0))
         ttk.Button(ctrl, text="Color", command=self.choose_color)\
@@ -237,6 +300,7 @@ class VideoAnnotatorUI:
         self.canvas.bind('<B3-Motion>',     lambda e: self._on_paint(e, False))
         self.canvas.bind('<ButtonPress-3>', lambda e: self._on_paint(e, False))
         self.canvas.bind('<Configure>',     lambda e: self._draw_scaled())
+
     def load_video(self):
         path = filedialog.askopenfilename(filetypes=[('Cine','*.cine')])
         try:
@@ -248,18 +312,19 @@ class VideoAnnotatorUI:
         self.total_frames = self.reader.frame_count
         self.mask = np.zeros((self.reader.height, self.reader.width), dtype=np.uint8)
         self.current_index = 0
-        self.mask = np.zeros((self.reader.height, self.reader.width), dtype=np.uint8)            
-        for w in (self.prev_btn, self.next_btn, self.confirm_btn, self.select_btn, self.export_btn):
+        for w in (self.prev_btn, self.next_btn, self.confirm_btn, self.select_btn, self.export_btn, self.circle_btn):
             w.config(state=tk.NORMAL)
         self.update_image()
 
     def prev_frame(self):
         if self.current_index>0:
-            self.current_index-=1; self.mask = np.zeros_like(self.mask); self.update_image()
+            self.current_index-=1
+            self.update_image()
 
     def next_frame(self):
         if self.current_index<self.total_frames-1:
-            self.current_index+=1; self.mask = np.zeros_like(self.mask); self.update_image()
+            self.current_index+=1
+            self.update_image()
 
     def update_image(self):
         frame = self.reader.read_frame(self.current_index).astype(np.float32)
@@ -302,8 +367,8 @@ class VideoAnnotatorUI:
             # Canvas not yet properly sized; draw the whole image
             cw, ch = scaled_w, scaled_h
 
-        x0s = int(self.canvas.canvasx(0))
-        y0s = int(self.canvas.canvasy(0))
+        x0s = max(0, int(self.canvas.canvasx(0)))
+        y0s = max(0, int(self.canvas.canvasy(0)))
         x1s = min(x0s + cw, scaled_w)
         y1s = min(y0s + ch, scaled_h)
 
@@ -320,18 +385,23 @@ class VideoAnnotatorUI:
         mask_pad = np.pad(self.mask, ((0, self.display_pad), (0, self.display_pad)), constant_values=0)
         mask_tile = mask_pad[y0:y1, x0:x1]
 
-        mask_img = Image.fromarray((mask_tile * 255).astype(np.uint8))
         base_tile = enlarge_image(base_tile, int(self.zoom_factor))
-        mask_img = enlarge_image(mask_img, int(self.zoom_factor)).convert('L')
-
-        overlay = Image.new('RGBA', mask_img.size,
-                            (*self.brush_color, self.alpha_var.get()))
         composited = base_tile.convert('RGBA')
-        composited.paste(overlay, (0, 0), mask_img)
+        if self.show_mask.get():
+            mask_img = Image.fromarray((mask_tile * 255).astype(np.uint8))
+            mask_img = enlarge_image(mask_img, int(self.zoom_factor)).convert('L')
+            overlay = Image.new('RGBA', mask_img.size,
+                                (*self.brush_color, self.alpha_var.get()))
+            composited.paste(overlay, (0, 0), mask_img)
 
         self.photo = ImageTk.PhotoImage(composited)
         self.canvas.delete('IMG')
         self.canvas.create_image(x0s, y0s, anchor='nw', image=self.photo, tags='IMG')
+        self.canvas.delete('CENTER')
+        cx = self.coord_x.get()*self.zoom_factor - x0s
+        cy = self.coord_y.get()*self.zoom_factor - y0s
+        r = 5
+        self.canvas.create_oval(cx-r, cy-r, cx+r, cy+r, outline='yellow', width=2, tags='CENTER')
         self.canvas.config(scrollregion=(0, 0, scaled_w, scaled_h))
 
     def _scroll_x(self, *args):
@@ -377,7 +447,12 @@ class VideoAnnotatorUI:
         """Open a dialog to choose a frame visually."""
         if self.total_frames:
             FrameSelector(self)
-    
+
+    def open_circle_selector(self):
+        """Open a dialog to pick three points and compute a circle."""
+        if self.total_frames:
+            CircleSelector(self)
+            
     def export_mask(self):
         """Save the current mask as .npy and .jpg"""
         if self.total_frames == 0:

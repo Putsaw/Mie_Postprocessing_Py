@@ -38,6 +38,9 @@ async def main():
         subprocess.run(["python", "masking.py"], check=True)
         chamber_mask = np.load("chamber_mask.npy")
     
+    if os.path.exists("test_mask.npy"):
+        test_mask = np.load("test_mask.npy")==0
+    
 
 
     for subfolder in subfolders:
@@ -322,7 +325,8 @@ async def main():
                 plt.show()'''
             else:
                 # gamma correcetion of video
-                mie_video = mask_video(video[15:150,:,:], chamber_mask)
+                # mie_video = mask_video(video[15:150,:,:], chamber_mask)
+                mie_video = mask_video(video[15:150,:,:], test_mask)
                 # play_video_cv2(mie_video, intv=17)
 
                 # mapping the video to a 2D image of its pixel intensity ranges
