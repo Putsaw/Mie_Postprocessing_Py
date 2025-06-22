@@ -340,7 +340,10 @@ class VideoAnnotatorUI:
         self._draw_scaled()
 
     def _on_paint(self,event,paint=True):
-        x=int(self.canvas.canvasx(event.x)/self.zoom_factor); y=int(self.canvas.canvasy(event.y)/self.zoom_factor)
+        x=int(self.canvas.canvasx(event.x)/self.zoom_factor)
+        y=int(self.canvas.canvasy(event.y)/self.zoom_factor)
+        x=max(0, min(x, self.mask.shape[1]-1))
+        y=max(0, min(y, self.mask.shape[0]-1))        
         size=self.brush_size.get()
         if self.brush_shape.get()=='circle':
             yy,xx=np.ogrid[-y:self.mask.shape[0]-y, -x:self.mask.shape[1]-x]; mask_area = xx*xx+yy*yy<=size*size
