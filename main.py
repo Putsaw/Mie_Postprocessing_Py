@@ -59,6 +59,7 @@ async def main():
             frames, height, width = video.shape
             # video = video.astype(float)
             # play_video_cv2(video)
+            video = video**2
 
             if "Shadow" in file.name:
                 continue
@@ -326,7 +327,7 @@ async def main():
             else:
                 # gamma correcetion of video
                 # mie_video = mask_video(video[15:150,:,:], chamber_mask)
-                mie_video = mask_video(video[15:150,:,:], test_mask)
+                mie_video = mask_video(video, test_mask)
                 # play_video_cv2(mie_video, intv=17)
 
                 # mapping the video to a 2D image of its pixel intensity ranges
@@ -335,19 +336,54 @@ async def main():
                 # cv2.imshow("Range Map", range_map)
 
                 filtered_range_map = cv2.GaussianBlur(range_map, (5, 5), 0)
-                '''                
+                                
                 cv2.imshow("Filtered Range Map", filtered_range_map)
                 cv2.waitKey(0)      
                 cv2.destroyAllWindows()
+                
+                              
                 '''
-                import matplotlib.pyplot as plt                
-                bins = 4096
+                import matplotlib.pyplot as plt  
+                bins = 100
                 # hist = cv2.calcHist([filtered_range_map], [0], None, [bins], [0, 1], accumulate=False)
                 # hist_norm = hist / hist.sum()          # probability mass
                 hist, edges = np.histogram(filtered_range_map.ravel(), bins=bins, range=(0,1))
                 centers = (edges[:-1] + edges[1:]) / 2
                 # plt.plot(hist_norm); plt.xlim([0, bins]); plt.show()
-                plt.plot(centers, hist); plt.show
+                plt.plot(centers, hist); plt.ylim([0, 1e2]); plt.show()
+                '''
+                # import numpy as np
+                import matplotlib.pyplot as plt
+
+                bins = 1000
+                hist, edges = np.histogram(filtered_range_map.ravel(),
+                                        bins=bins, range=(0, 1))
+
+                centers = (edges[:-1] + edges[1:]) / 2
+
+                # ---------- 1. Histogram on a logarithmic y-axis ----------
+                fig, ax = plt.subplots()
+                ax.plot(centers, hist, lw=1.2)
+                ax.set_yscale('log')                 # logarithmic scale
+                ax.set_ylim(bottom=1)                # avoid log(0) issues
+                ax.set_xlabel("Range value")
+                ax.set_ylabel("Count (log scale)")
+                ax.set_title("Histogram of filtered_range_map")
+                ax.grid(True, which='both', ls='--', alpha=0.3)
+
+                # ---------- 2. Cumulative distribution function -----------
+                cdf = np.cumsum(hist).astype(float)
+                cdf /= cdf[-1]                       # normalise so max == 1
+
+                fig2, ax2 = plt.subplots()
+                ax2.plot(centers, cdf, lw=1.2)
+                ax2.set_ylim(0, 1.1)                   # cap at 100 %
+                ax2.set_xlabel("Range value")
+                ax2.set_ylabel("CDF")
+                ax2.set_title("CDF of filtered_range_map")
+                ax2.grid(True, ls='--', alpha=0.3)
+
+                plt.show()
 
                 
                 '''
@@ -363,7 +399,7 @@ async def main():
                 img16 = cv2.normalize(filtered_range_map, None, 0, 65535, cv2.NORM_MINMAX, dtype=cv2.CV_16U)
                 T16, bw = cv2.threshold(img16, 0, 65535,
                         cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-                print(f"Threshold value for glare mask: {T16}/65536")
+                print(f"Threshold value for glare mask: {T16/65536.0}")
                 
                 cv2.imshow("Binary Map", bw)
                 cv2.waitKey(0)
