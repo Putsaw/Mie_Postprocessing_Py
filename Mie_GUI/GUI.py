@@ -112,8 +112,17 @@ class CircleSelector(tk.Toplevel):
 
         self.title("Select Circle")
 
-        self.canvas = tk.Canvas(self, bg='black')
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+        cf = ttk.Frame(self)
+        cf.pack(fill=tk.BOTH, expand=True)
+        self.canvas = tk.Canvas(cf, bg='black')
+        hbar = ttk.Scrollbar(cf, orient=tk.HORIZONTAL, command=self.canvas.xview)
+        vbar = ttk.Scrollbar(cf, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.canvas.configure(xscrollcommand=hbar.set, yscrollcommand=vbar.set)
+        self.canvas.grid(row=0, column=0, sticky='nsew')
+        hbar.grid(row=1, column=0, sticky='we')
+        vbar.grid(row=0, column=1, sticky='ns')
+        cf.rowconfigure(0, weight=1)
+        cf.columnconfigure(0, weight=1)
         self.canvas.bind('<Button-1>', self._on_click)
         self.canvas.bind('<MouseWheel>', self._on_zoom)
         self.canvas.bind('<Button-4>', self._on_zoom)
@@ -221,7 +230,7 @@ class VideoAnnotatorUI:
         self.select_btn.grid(row=0, column=lp['select_btn'], padx=2)
         self.export_btn = ttk.Button(ctrl, text="Export Mask", command=self.export_mask, state=tk.DISABLED)
         self.export_btn.grid(row=0, column=lp['select_btn']+1, padx=2)
-        self.circle_btn = ttk.Button(ctrl, text="Circle", command=self.open_circle_selector, state=tk.DISABLED)
+        self.circle_btn = ttk.Button(ctrl, text="Calibration", command=self.open_circle_selector, state=tk.DISABLED)
         self.circle_btn.grid(row=0, column=lp['select_btn']+2, padx=2)
 
         # Row 1: Gain/Gamma/Black/White + Apply
@@ -253,6 +262,42 @@ class VideoAnnotatorUI:
         tk.Scale(ctrl, from_=0, to=255, orient=tk.HORIZONTAL,
                  variable=self.alpha_var, length=100).grid(
             row=2, column=bc+9, pady=(5,0), sticky='w')
+        
+                # Row 3: Ring mask parameters
+        ttk.Label(ctrl, text="Inner R:").grid(row=3, column=bc, pady=(5,0))
+        self.inner_radius = tk.IntVar(value=0)
+        ttk.Entry(ctrl, textvariable=self.inner_radius, width=5).grid(row=3, column=bc+1, pady=(5,0))
+        ttk.Label(ctrl, text="Outer R:").grid(row=3, column=bc+2, pady=(5,0))
+        self.outer_radius = tk.IntVar(value=0)
+        ttk.Entry(ctrl, textvariable=self.outer_radius, width=5).grid(row=3, column=bc+3, pady=(5,0))
+        ttk.Button(ctrl, text="Add Ring", command=self.add_ring_mask).grid(row=3, column=bc+4, padx=(10,0), pady=(5,0))
+
+        # Row 4: Plume visualization parameters
+        ttk.Label(ctrl, text="Plumes:").grid(row=4, column=bc, pady=(5,0))
+        self.num_plumes = tk.IntVar(value=0)
+        ttk.Entry(ctrl, textvariable=self.num_plumes, width=5).grid(row=4, column=bc+1, pady=(5,0))
+        ttk.Label(ctrl, text="Offset:").grid(row=4, column=bc+2, pady=(5,0))
+        self.plume_offset = tk.DoubleVar(value=0.0)
+        ttk.Entry(ctrl, textvariable=self.plume_offset, width=5).grid(row=4, column=bc+3, pady=(5,0))
+
+    def add_ring_mask(self):
+        """Add a ring (or circle) mask centered at the calibration coordinate."""
+        if self.mask is None:
+            return
+        cx = self.coord_x.get()
+        cy = self.coord_y.get()
+        r_in = max(0, self.inner_radius.get())
+        r_out = self.outer_radius.get()
+        if r_out <= 0:
+            return
+
+        yy, xx = np.ogrid[:self.mask.shape[0], :self.mask.shape[1]]
+        dist2 = (xx - cx) ** 2 + (yy - cy) ** 2
+        ring = dist2 <= r_out ** 2
+        if r_in > 0:
+            ring &= dist2 >= r_in ** 2
+        self.mask[ring] = 1
+        self._draw_scaled()
 
     def choose_color(self):
         color = colorchooser.askcolor(color='#%02x%02x%02x' % self.brush_color, title='Select brush color')
@@ -398,10 +443,27 @@ class VideoAnnotatorUI:
         self.canvas.delete('IMG')
         self.canvas.create_image(x0s, y0s, anchor='nw', image=self.photo, tags='IMG')
         self.canvas.delete('CENTER')
-        cx = self.coord_x.get()*self.zoom_factor - x0s
-        cy = self.coord_y.get()*self.zoom_factor - y0s
+        self.canvas.delete('PLUME')
+        cx = self.coord_x.get()*self.zoom_factor
+        cy = self.coord_y.get()*self.zoom_factor
         r = 5
         self.canvas.create_oval(cx-r, cy-r, cx+r, cy+r, outline='yellow', width=2, tags='CENTER')
+
+        n_plumes = int(self.num_plumes.get()) if self.num_plumes.get() > 0 else 0
+        if n_plumes > 0:
+            step = 360.0 / n_plumes
+            offset = self.plume_offset.get() % 360.0
+            length = max(self.mask.shape) * self.zoom_factor
+            for i in range(n_plumes):
+                ang = np.deg2rad(offset + i * step)
+                x_end = cx + length * np.cos(ang)
+                y_end = cy - length * np.sin(ang)
+                self.canvas.create_line(cx, cy, x_end, y_end, fill='cyan', tags='PLUME')
+                mid_ang = np.deg2rad(offset + i * step + step / 2)
+                mx = cx + length * np.cos(mid_ang)
+                my = cy - length * np.sin(mid_ang)
+                self.canvas.create_line(cx, cy, mx, my, fill='white', dash=(5,), tags='PLUME')
+
         self.canvas.config(scrollregion=(0, 0, scaled_w, scaled_h))
 
     def _scroll_x(self, *args):
@@ -440,13 +502,13 @@ class VideoAnnotatorUI:
         idx = self.frame_entry.get() - 1
         if 0 <= idx < self.total_frames:
             self.current_index = idx
-            self.mask = np.zeros_like(self.mask)
             self.update_image()
 
     def open_frame_selector(self):
         """Open a dialog to choose a frame visually."""
         if self.total_frames:
             FrameSelector(self)
+    
 
     def open_circle_selector(self):
         """Open a dialog to pick three points and compute a circle."""
@@ -462,7 +524,7 @@ class VideoAnnotatorUI:
                                                  filetypes=[('NumPy file','*.npy')])
         if not file_path:
             return
-        np.save(file_path, self.mask)
+        np.save(file_path, self.mask.astype(np.bool_))
         img = Image.fromarray((self.mask * 255).astype(np.uint8))
         img.save(os.path.splitext(file_path)[0] + '.jpg')
         messagebox.showinfo('Export', 'Mask exported')
