@@ -59,7 +59,7 @@ async def main():
             frames, height, width = video.shape
             # video = video.astype(float)
             # play_video_cv2(video)
-            video = video**2
+            # video = video**2
 
             if "Shadow" in file.name:
                 continue
@@ -352,7 +352,9 @@ async def main():
                 # plt.plot(hist_norm); plt.xlim([0, bins]); plt.show()
                 plt.plot(centers, hist); plt.ylim([0, 1e2]); plt.show()
                 '''
-                # import numpy as np
+                
+                '''
+                # Showing the histogram and CDF of the filtered range map
                 import matplotlib.pyplot as plt
 
                 bins = 1000
@@ -384,7 +386,7 @@ async def main():
                 ax2.grid(True, ls='--', alpha=0.3)
 
                 plt.show()
-
+                '''
                 
                 '''
                 bins = 1000
@@ -394,9 +396,32 @@ async def main():
                 plt.show()
                 '''
 
-                # bw_map = cv2.threshold(filtered_range_map, 0, 255, cv2.THRESH_BINARY)[1]
+                '''
+                # Segmentation with kmeans
+                pixel_vals = filtered_range_map.reshape((-1, 1))
+                # Set k-means criteria and perform clustering (e.g., k=2 for two segments)
+                criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+                K = 2
+                attempts = 10  
+
+                compactness, labels, centers = cv2.kmeans(
+                    pixel_vals, K, None, criteria, attempts, cv2.KMEANS_PP_CENTERS
+                ) # type: ignore
+                labels = labels.flatten()
+                segmented = centers[labels].reshape(filtered_range_map.shape).astype(np.uint16)
+                
+                # Optionally, convert labels to a binary mask:
+                bw = ~(labels.reshape(filtered_range_map.shape) == np.argmax(np.bincount(labels))).astype(np.uint8) * 255
+                cv2.imshow("Binary Map Kmeans", bw)
+                cv2.waitKey(0)
+                cv2.destroyAllWindows()
+                '''
+
+
+                # bw_map = cv2.threshold(filtered_range_map 0, 65535, cv2.NORM, 0, 255, cv2.THRESH_BINARY)[1]
                 # bw_map = cv2.threshold(filtered_range_map,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)[1]
-                img16 = cv2.normalize(filtered_range_map, None, 0, 65535, cv2.NORM_MINMAX, dtype=cv2.CV_16U)
+                '''
+                img16 = cv2.normalize(filtered_range_map, None, cv2.NORM_MINMAX, dtype=cv2.CV_16U)
                 T16, bw = cv2.threshold(img16, 0, 65535,
                         cv2.THRESH_BINARY | cv2.THRESH_OTSU)
                 print(f"Threshold value for glare mask: {T16/65536.0}")
@@ -404,19 +429,42 @@ async def main():
                 cv2.imshow("Binary Map", bw)
                 cv2.waitKey(0)
                 cv2.destroyAllWindows()
+                '''
+                # Normalize the filtered range map to 16-bit unsigned integer
+                img16 = cv2.normalize(filtered_range_map, None, 0, 65535, cv2.NORM_MINMAX, dtype=cv2.CV_16U) # type: ignore
+                
+                # Thresholding to create a binary mask
+                # pct = np.percentile(img16, 5)
+                pct = 0.05
+                
 
-                masked_video = mask_video(mie_video, bw)
+                # Thresholding
+                _, bw = cv2.threshold(img16, round(pct*65535), 65535,cv2.THRESH_BINARY)
+                cv2.imshow("Binary Map", bw)
+                cv2.waitKey(0)
+                cv2.destroyAllWindows()
+
+                # Attempt to solve 
+                # First derivatives
+                sobelx = cv2.Sobel(filtered_range_map.astype(np.float64), cv2.CV_64F, dx=1, dy=0, ksize=3)
+                sobely = cv2.Sobel(filtered_range_map.astype(np.float64), cv2.CV_64F, dx=0, dy=1, ksize=3)
+
+                # Compute gradient magnitude
+                grad_mag = np.sqrt(sobelx**2 + sobely**2)
+
+                # Normalize to display as 8-bit
+                grad_mag = cv2.convertScaleAbs(grad_mag)
+                cv2.imshow("Gradient Magnitude", grad_mag*255.0)
+
+
+
+
+
+                masked_video = 10*mask_video(mie_video, bw)
                 play_video_cv2(masked_video, intv=17)
                 play_video_cv2(mask_video(mie_video, ~bw), intv=17)
 
 
-
-
-                                    
-
-
-
-            
 if __name__ == '__main__':
     
     

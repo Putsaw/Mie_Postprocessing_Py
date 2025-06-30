@@ -117,7 +117,7 @@ def rotate_frame(frame, angle):
         # Use INTER_NEAREST to preserve mask values.
         rotated_uint8 = cv2.warpAffine(frame_uint8, M, (w, h), flags=cv2.INTER_NEAREST)
         # Convert back to boolean mask.
-        rotated = rotated_uint8 > 127
+        rotated = rotated_uint8 > 127 
     else:
         rotated = cv2.warpAffine(frame, M, (w, h), flags=cv2.INTER_CUBIC)
     
@@ -231,27 +231,6 @@ def rotate_video_cuda(video_array, angle=0, max_workers=4):
 # -----------------------------
 # Masking and Binarization Pipeline
 # -----------------------------
-'''
-def mask_frame(i, video, chamber_mask_bool):
-    return video[i] * chamber_mask_bool
-
-
-def mask_video(video: np.ndarray, chamber_mask: np.ndarray):
-    num_frames, height, width = video.shape
-    masked_video = np.zeros_like(video)
-    # Ensure chamber_mask is boolean
-    chamber_mask_bool = chamber_mask if chamber_mask.dtype == bool else (chamber_mask > 0)
-    
-    # Use executor.map with the top-level mask_frame function.
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        # Pass video and chamber_mask_bool as iterables by repeating them for each frame.
-        results = list(executor.map(mask_frame, range(num_frames), [video]*num_frames, [chamber_mask_bool]*num_frames))
-    
-    for i, frame in enumerate(results):
-        masked_video[i] = frame
-        
-    return masked_video
-'''
 def mask_video(video: np.ndarray, chamber_mask: np.ndarray) -> np.ndarray:
     # Ensure chamber_mask is boolean.
     chamber_mask_bool = chamber_mask if chamber_mask.dtype == bool else (chamber_mask > 0)
