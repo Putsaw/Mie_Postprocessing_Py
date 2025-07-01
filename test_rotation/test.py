@@ -55,6 +55,9 @@ def make_rotation_maps(
 
     return map_x, map_y
 
+'''
+
+
 def rotate_and_crop(
     frame: np.ndarray,
     angle: float,
@@ -79,7 +82,91 @@ def rotate_and_crop(
         # Normal image: bicubic for quality
         return cv2.remap(frame, map_x, map_y,
                          interpolation=cv2.INTER_CUBIC)
+'''
+                         
+def rotate_and_crop(
+    frame: np.ndarray,
+    angle: float,
+    crop_rect: Optional[CropRect] = None
+) -> np.ndarray:
+    """
+    Rotate `frame` by `angle` (degrees CCW) and optionally crop the result.
+    Uses precomputed remap tables for efficiency.
+    Uses CUDA acceleration if available.
+    """
+    h, w = frame.shape[:2]
+    map_x, map_y = make_rotation_maps((h, w), angle, crop_rect)
     
+    # Check if CUDA is available
+    use_cuda = False
+    try:
+        if hasattr(cv2, 'cuda') and cv2.cuda.getCudaEnabledDeviceCount() > 0:
+            use_cuda = True
+    except (AttributeError, ImportError):
+        # cv2.cuda is not available
+        use_cuda = False
+
+    # Choose interpolation per dtype
+    if frame.dtype == np.bool_:
+        # Boolean mask → uint8 for remap
+        tmp = (frame.astype(np.uint8) * 255)
+        
+        if use_cuda:
+            try:
+                # Convert to GPU
+                gpu_tmp = cv2.cuda.GpuMat()
+                gpu_tmp.upload(tmp)
+                
+                # Create GPU maps
+                gpu_map_x = cv2.cuda.GpuMat()
+                gpu_map_x.upload(map_x)
+                gpu_map_y = cv2.cuda.GpuMat()
+                gpu_map_y.upload(map_y)
+                
+                # Perform remap on GPU
+                gpu_result = cv2.cuda.remap(gpu_tmp, gpu_map_x, gpu_map_y, 
+                                            cv2.INTER_NEAREST)
+                
+                # Download result
+                remapped = gpu_result.download()
+            except Exception:
+                # Fall back to CPU if CUDA operation fails
+                remapped = cv2.remap(tmp, map_x, map_y,
+                                   interpolation=cv2.INTER_NEAREST)
+        else:
+            remapped = cv2.remap(tmp, map_x, map_y,
+                               interpolation=cv2.INTER_NEAREST)
+            
+        return remapped > 127
+
+    else:
+        # Normal image: bicubic for quality
+        if use_cuda:
+            try:
+                # Convert to GPU
+                gpu_frame = cv2.cuda.GpuMat()
+                gpu_frame.upload(frame)
+                
+                # Create GPU maps
+                gpu_map_x = cv2.cuda.GpuMat()
+                gpu_map_x.upload(map_x)
+                gpu_map_y = cv2.cuda.GpuMat()
+                gpu_map_y.upload(map_y)
+                
+                # Perform remap on GPU
+                gpu_result = cv2.cuda.remap(gpu_frame, gpu_map_x, gpu_map_y, 
+                                           cv2.INTER_CUBIC)
+                
+                # Download result
+                return gpu_result.download()
+            except Exception:
+                # Fall back to CPU if CUDA operation fails
+                return cv2.remap(frame, map_x, map_y,
+                              interpolation=cv2.INTER_CUBIC)
+        else:
+            return cv2.remap(frame, map_x, map_y,
+                          interpolation=cv2.INTER_CUBIC)
+
 
 def main():
     
@@ -89,7 +176,7 @@ def main():
     
     # One-time (first call builds maps)
     angle = 60
-    crop = (150, 150, 400, 400)  # x, y, width, height
+    crop = (50, 150, 400, 400)  # x, y, width, height
 
     # For each frame in your video loop:
     rotated = rotate_and_crop(frame, angle, crop)
