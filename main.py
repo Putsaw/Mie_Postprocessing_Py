@@ -14,6 +14,8 @@ import subprocess
 from scipy.signal import convolve2d
 
 import asyncio
+
+from rotate_crop import *
 # Define a semaphore with a limit on concurrent tasks
 SEMAPHORE_LIMIT = 2  # Adjust this based on your CPU capacity
 semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
@@ -328,6 +330,14 @@ async def main():
                 # gamma correcetion of video
                 # mie_video = mask_video(video[15:150,:,:], chamber_mask)
                 mie_video = mask_video(video, test_mask)
+
+                crop = (0, 0, 300, 700)
+
+                strip = rotate_and_crop(mie_video, 20, crop, is_video=True)
+
+                play_video_cv2(strip, intv=17)
+
+
                 # play_video_cv2(mie_video, intv=17)
 
                 # mapping the video to a 2D image of its pixel intensity ranges

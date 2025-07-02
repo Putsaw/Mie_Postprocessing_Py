@@ -170,27 +170,3 @@ def rotate_and_crop(
         else:
             return cv2.remap(array, map_x, map_y,
                           interpolation=cv2.INTER_CUBIC)
-
-
-def main():
-    
-    frame = cv2.imread('test.png')  # Load your image/frame here
-    frame = np.array(frame, dtype=np.uint8)  # Ensure it's a numpy array
-    # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # Convert to RGB if needed
-    
-    # One-time (first call builds maps)
-    angle = 60
-    crop = (50, 150, 400, 400)  # x, y, width, height
-
-    # For each frame in your video loop:
-    rotated = rotate_and_crop(frame, angle, crop)
-    # ... process or display `rotated` ...
-
-    cv2.imshow("rotated", rotated)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-if __name__ == "__main__":
-    main()
-
-
