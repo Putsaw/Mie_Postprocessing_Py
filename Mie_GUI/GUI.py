@@ -228,10 +228,11 @@ class VideoAnnotatorUI:
         self.next_btn.grid(row=0, column=lp['next_btn'], padx=2)
         self.select_btn = ttk.Button(ctrl, text="Select Frame", command=self.open_frame_selector, state=tk.DISABLED)
         self.select_btn.grid(row=0, column=lp['select_btn'], padx=2)
-        self.export_btn = ttk.Button(ctrl, text="Export Mask", command=self.export_mask, state=tk.DISABLED)
-        self.export_btn.grid(row=0, column=lp['select_btn']+1, padx=2)
         self.circle_btn = ttk.Button(ctrl, text="Calibration", command=self.open_circle_selector, state=tk.DISABLED)
-        self.circle_btn.grid(row=0, column=lp['select_btn']+2, padx=2)
+        self.circle_btn.grid(row=0, column=lp['select_btn']+1, padx=2)
+        self.export_btn = ttk.Button(ctrl, text="Export Mask", command=self.export_mask, state=tk.DISABLED)
+        self.export_btn.grid(row=0, column=lp['select_btn']+3, padx=2)
+
 
         # Row 1: Gain/Gamma/Black/White + Apply
         for i,name in enumerate(["Gain","Gamma","Black","White"]):
