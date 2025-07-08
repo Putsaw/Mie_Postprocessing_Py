@@ -42,17 +42,16 @@ def main():
     
 
     
-    '''
+    
     # masked_strip = mask_video(strip, chamber_mask)
-    masked_strip = strip
 
-    background = np.median(masked_strip[:, :, :], axis=0)
+    background = np.median(masked_strip[0:50, :, :], axis=0)
 
     # Subtract background
     foreground = masked_strip - background[None, :, :]
 
     # Clip to avoid negative values (assuming uint16 data)
-    foreground = np.clip(foreground, 0, None).astype(np.uint16)
+    # foreground = np.clip(foreground, 0, None).astype(np.uint16)
     # foreground = np.abs(foreground).astype(np.uint16)  # Ensure no negative values
 
     viewer = napari.view_image(
@@ -109,7 +108,7 @@ def main():
 
 
     np.savez_compressed("diff_filtered.npz", masked_strip=masked_strip)
-    '''
+    
     
 
 if __name__ == "__main__":

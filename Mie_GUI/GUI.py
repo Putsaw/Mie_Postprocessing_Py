@@ -149,7 +149,7 @@ class CircleSelector(tk.Toplevel):
 
     def _on_click(self, event):
         x = int(self.canvas.canvasx(event.x) / self.zoom_factor)
-        y = int(self.canvas.canvasy(event.y) / self.zoom_factor)
+        y = int(self.canvas.canvasy(event.y) / self.zoom_factor) 
         self.points.append((x, y))
         r = 3
         self.canvas.create_oval(event.x - r, event.y - r, event.x + r, event.y + r, outline='red')

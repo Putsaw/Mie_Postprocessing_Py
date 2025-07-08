@@ -293,3 +293,37 @@ def map_video_to_range(video):
     # return range_map_normalized
 
     return range_map
+
+def imhist(image, bins=1000, log=False, exclude_zero=False):
+    """
+    Plot histogram (and implicitly CDF via cumulated counts if desired) of image data.
+    
+    Parameters
+    ----------
+    image : array-like
+        Input image values expected in [0, 1].
+    bins : int
+        Number of histogram bins.
+    log : bool
+        If True, use logarithmic y-axis.
+    exclude_zero : bool
+        If True, filter out zero-valued pixels before computing histogram.
+    """
+    # Flatten image
+    data = image.ravel()
+    if exclude_zero:
+        data = data[data != 0]
+    
+    hist, edges = np.histogram(data, bins=bins, range=(0, 1))
+    centers = (edges[:-1] + edges[1:]) / 2
+
+    fig, ax = plt.subplots()
+    ax.plot(centers, hist, lw=1.2)
+    if log:
+        ax.set_yscale('log')
+        ax.set_ylim(bottom=1)  # avoid log(0) issues
+    ax.set_xlabel("Range value")
+    ax.set_ylabel("Count" + (" (log scale)" if log else ""))
+    ax.set_title("Histogram of image" + (" (zeros excluded)" if exclude_zero else ""))
+    ax.grid(True, which='both', ls='--', alpha=0.3)
+    plt.show()

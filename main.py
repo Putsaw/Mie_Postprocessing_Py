@@ -25,10 +25,30 @@ async def play_video_cv2_async(video, gain=1, binarize=False, thresh=0.5, intv=1
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, play_video_cv2, video, gain, binarize, thresh, intv)
 
+def MIE_pipeline(video):
+    crop = (0, 0, 768, 768)
+
+    strip = rotate_and_crop(video, 20, crop, is_video=True)
+
+    play_video_cv2(strip, intv=17)
+
+            # mapping the video to a 2D image of its pixel intensity ranges
+    range_map = map_video_to_range(video)
+
+    imhist(range_map, log=True, exclude_zero=True)
+
+    # cv2.imshow("Range Map", range_map)
+
+    filtered_range_map = cv2.GaussianBlur(range_map, (5, 5), 0)
+            
+    cv2.imshow("Filtered Range Map", filtered_range_map)
+    cv2.waitKey(0)      
+    cv2.destroyAllWindows()
+
 
 
 async def main():
-    parent_folder = r"G:\Master_Thesis\BC20220627 - Heinzman DS300 - Mie Top view\Cine"
+    parent_folder = r"G:\Master_Thesis\BC20220627 - Heinzman DS300 - Mie Top view\Cine\Interest"
     
     #parent_folder = r"E:\TP_example"
     subfolders = get_subfolder_names(parent_folder)  # Ensure get_subfolder_names is defined or imported
@@ -42,6 +62,9 @@ async def main():
     
     if os.path.exists("test_mask.npy"):
         test_mask = np.load("test_mask.npy")==0
+
+    if os.path.exists("region_unblocked.npy"):
+        region_unblocked = np.load("region_unblocked.npy")
     
 
 
@@ -331,148 +354,10 @@ async def main():
                 # mie_video = mask_video(video[15:150,:,:], chamber_mask)
                 mie_video = mask_video(video, test_mask)
 
-                crop = (0, 0, 300, 700)
-
-                strip = rotate_and_crop(mie_video, 20, crop, is_video=True)
-
-                play_video_cv2(strip, intv=17)
-
-
-                # play_video_cv2(mie_video, intv=17)
-
-                # mapping the video to a 2D image of its pixel intensity ranges
-                range_map = map_video_to_range(mie_video)
-
-                # cv2.imshow("Range Map", range_map)
-
-                filtered_range_map = cv2.GaussianBlur(range_map, (5, 5), 0)
-                                
-                cv2.imshow("Filtered Range Map", filtered_range_map)
-                cv2.waitKey(0)      
-                cv2.destroyAllWindows()
-                
-                              
-                '''
-                import matplotlib.pyplot as plt  
-                bins = 100
-                # hist = cv2.calcHist([filtered_range_map], [0], None, [bins], [0, 1], accumulate=False)
-                # hist_norm = hist / hist.sum()          # probability mass
-                hist, edges = np.histogram(filtered_range_map.ravel(), bins=bins, range=(0,1))
-                centers = (edges[:-1] + edges[1:]) / 2
-                # plt.plot(hist_norm); plt.xlim([0, bins]); plt.show()
-                plt.plot(centers, hist); plt.ylim([0, 1e2]); plt.show()
-                '''
-                
-                '''
-                # Showing the histogram and CDF of the filtered range map
-                import matplotlib.pyplot as plt
-
-                bins = 1000
-                hist, edges = np.histogram(filtered_range_map.ravel(),
-                                        bins=bins, range=(0, 1))
-
-                centers = (edges[:-1] + edges[1:]) / 2
-
-                # ---------- 1. Histogram on a logarithmic y-axis ----------
-                fig, ax = plt.subplots()
-                ax.plot(centers, hist, lw=1.2)
-                ax.set_yscale('log')                 # logarithmic scale
-                ax.set_ylim(bottom=1)                # avoid log(0) issues
-                ax.set_xlabel("Range value")
-                ax.set_ylabel("Count (log scale)")
-                ax.set_title("Histogram of filtered_range_map")
-                ax.grid(True, which='both', ls='--', alpha=0.3)
-
-                # ---------- 2. Cumulative distribution function -----------
-                cdf = np.cumsum(hist).astype(float)
-                cdf /= cdf[-1]                       # normalise so max == 1
-
-                fig2, ax2 = plt.subplots()
-                ax2.plot(centers, cdf, lw=1.2)
-                ax2.set_ylim(0, 1.1)                   # cap at 100 %
-                ax2.set_xlabel("Range value")
-                ax2.set_ylabel("CDF")
-                ax2.set_title("CDF of filtered_range_map")
-                ax2.grid(True, ls='--', alpha=0.3)
-
-                plt.show()
-                '''
-                
-                '''
-                bins = 1000
-                hist, edges = np.histogram(filtered_range_map.ravel(), bins=bins, range=(0,1))
-                centers = (edges[:-1] + edges[1:]) / 2
-                plt.plot(centers, hist)
-                plt.show()
-                '''
-
-                '''
-                # Segmentation with kmeans
-                pixel_vals = filtered_range_map.reshape((-1, 1))
-                # Set k-means criteria and perform clustering (e.g., k=2 for two segments)
-                criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-                K = 2
-                attempts = 10  
-
-                compactness, labels, centers = cv2.kmeans(
-                    pixel_vals, K, None, criteria, attempts, cv2.KMEANS_PP_CENTERS
-                ) # type: ignore
-                labels = labels.flatten()
-                segmented = centers[labels].reshape(filtered_range_map.shape).astype(np.uint16)
-                
-                # Optionally, convert labels to a binary mask:
-                bw = ~(labels.reshape(filtered_range_map.shape) == np.argmax(np.bincount(labels))).astype(np.uint8) * 255
-                cv2.imshow("Binary Map Kmeans", bw)
-                cv2.waitKey(0)
-                cv2.destroyAllWindows()
-                '''
-
-
-                # bw_map = cv2.threshold(filtered_range_map 0, 65535, cv2.NORM, 0, 255, cv2.THRESH_BINARY)[1]
-                # bw_map = cv2.threshold(filtered_range_map,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)[1]
-                '''
-                img16 = cv2.normalize(filtered_range_map, None, cv2.NORM_MINMAX, dtype=cv2.CV_16U)
-                T16, bw = cv2.threshold(img16, 0, 65535,
-                        cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-                print(f"Threshold value for glare mask: {T16/65536.0}")
-                
-                cv2.imshow("Binary Map", bw)
-                cv2.waitKey(0)
-                cv2.destroyAllWindows()
-                '''
-                # Normalize the filtered range map to 16-bit unsigned integer
-                img16 = cv2.normalize(filtered_range_map, None, 0, 65535, cv2.NORM_MINMAX, dtype=cv2.CV_16U) # type: ignore
-                
-                # Thresholding to create a binary mask
-                # pct = np.percentile(img16, 5)
-                pct = 0.05
-                
-
-                # Thresholding
-                _, bw = cv2.threshold(img16, round(pct*65535), 65535,cv2.THRESH_BINARY)
-                cv2.imshow("Binary Map", bw)
-                cv2.waitKey(0)
-                cv2.destroyAllWindows()
-
-                # Attempt to solve 
-                # First derivatives
-                sobelx = cv2.Sobel(filtered_range_map.astype(np.float64), cv2.CV_64F, dx=1, dy=0, ksize=3)
-                sobely = cv2.Sobel(filtered_range_map.astype(np.float64), cv2.CV_64F, dx=0, dy=1, ksize=3)
-
-                # Compute gradient magnitude
-                grad_mag = np.sqrt(sobelx**2 + sobely**2)
-
-                # Normalize to display as 8-bit
-                grad_mag = cv2.convertScaleAbs(grad_mag)
-                cv2.imshow("Gradient Magnitude", grad_mag*255.0)
+                MIE_pipeline(mie_video)
 
 
 
-
-
-                masked_video = 10*mask_video(mie_video, bw)
-                play_video_cv2(masked_video, intv=17)
-                play_video_cv2(mask_video(mie_video, ~bw), intv=17)
 
 
 if __name__ == '__main__':
