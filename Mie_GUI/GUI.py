@@ -100,13 +100,13 @@ class FrameSelector(tk.Toplevel):
         self.destroy()
         
 class CircleSelector(tk.Toplevel):
-    """Window to pick three points and compute a circle."""
+    """Window to pick N points and compute a best-fit circle."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, image, num_points):
         super().__init__(parent.master)
         self.parent = parent
-        self.reader = parent.reader
-        self.current_index = parent.current_index
+        self.image = image
+        self.num_points = max(3, int(num_points))
         self.zoom_factor = 1
         self.points = []
 
@@ -130,34 +130,40 @@ class CircleSelector(tk.Toplevel):
 
         self.show_frame()
 
-    def read_frame(self, idx):
-        frame = self.reader.read_frame(idx)
-        img8 = np.clip(frame / 16, 0, 255).astype(np.uint8)
-        return Image.fromarray(img8)
+
 
     def show_frame(self):
-        img = enlarge_image(self.read_frame(self.current_index), self.zoom_factor)
+        img = enlarge_image(self.image, int(self.zoom_factor))
         self.photo = ImageTk.PhotoImage(img)
         self.canvas.delete('all')
         self.canvas.create_image(0, 0, anchor='nw', image=self.photo)
         self.canvas.config(scrollregion=(0, 0, self.photo.width(), self.photo.height()))
+        self._draw_points()
 
     def _on_zoom(self, event):
         direction = 1 if getattr(event, 'delta', 0) > 0 or getattr(event, 'num', None) == 4 else -1
         self.zoom_factor = max(1, self.zoom_factor + direction)
         self.show_frame()
 
-    def _on_click(self, event):
-        x = int(self.canvas.canvasx(event.x) / self.zoom_factor)
-        y = int(self.canvas.canvasy(event.y) / self.zoom_factor) 
-        self.points.append((x, y))
+    def _draw_points(self):
         r = 3
-        self.canvas.create_oval(event.x - r, event.y - r, event.x + r, event.y + r, outline='red')
-        if len(self.points) == 3:
+        self.canvas.delete('POINT')
+        for x, y in self.points:
+            sx = x * self.zoom_factor
+            sy = y * self.zoom_factor
+            self.canvas.create_oval(sx - r, sy - r, sx + r, sy + r,
+                                   outline='red', tags='POINT')
+
+    def _on_click(self, event):
+        x = self.canvas.canvasx(event.x) / self.zoom_factor
+        y = self.canvas.canvasy(event.y) / self.zoom_factor
+        self.points.append((x, y))
+        self._draw_points()
+        if len(self.points) == self.num_points:
             center, radius = calc_circle(*self.points)
             print(f"Circle radius: {radius}")
-            self.parent.coord_x.set(int(center[0]))
-            self.parent.coord_y.set(int(center[1]))
+            self.parent.coord_x.set(center[0])
+            self.parent.coord_y.set(center[1])
             self.parent._draw_scaled()
             self.destroy()
 
@@ -196,14 +202,15 @@ class VideoAnnotatorUI:
         self.brush_shape = tk.StringVar(value='circle')
         self.brush_size = tk.IntVar(value=10)
         self.show_mask = tk.BooleanVar(value=True)
-        self.coord_x = tk.IntVar(value=0)
-        self.coord_y = tk.IntVar(value=0)
+        self.coord_x = tk.DoubleVar(value=0.0)
+        self.coord_y = tk.DoubleVar(value=0.0)
         # Processing params dictionary (gain, gamma, etc.)
         self.vars = {}
 
         # Build UI
         self._build_controls(master)
         self._build_content(master)
+        self._update_calib_button()
 
     # ------------------------------------------------------------------
     #                           CONTROL BAR
@@ -213,6 +220,7 @@ class VideoAnnotatorUI:
         ctrl = ttk.Frame(parent)
         ctrl.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
         lp = self.layout_positions
+        bc = lp['param_start_col']
 
         # Row 0: Load / navigation controls
         self.load_btn = ttk.Button(ctrl, text="Load Video", command=self.load_video)
@@ -228,58 +236,68 @@ class VideoAnnotatorUI:
         self.next_btn.grid(row=0, column=lp['next_btn'], padx=2)
         self.select_btn = ttk.Button(ctrl, text="Select Frame", command=self.open_frame_selector, state=tk.DISABLED)
         self.select_btn.grid(row=0, column=lp['select_btn'], padx=2)
-        self.circle_btn = ttk.Button(ctrl, text="Calibration", command=self.open_circle_selector, state=tk.DISABLED)
-        self.circle_btn.grid(row=0, column=lp['select_btn']+1, padx=2)
         self.export_btn = ttk.Button(ctrl, text="Export Mask", command=self.export_mask, state=tk.DISABLED)
-        self.export_btn.grid(row=0, column=lp['select_btn']+3, padx=2)
+        self.export_btn.grid(row=0, column=lp['param_start_col']+10, padx=2)
+
+        # Row 1: Plume visualization parameters 
+        ttk.Label(ctrl, text="Plumes:").grid(row=1, column=bc, pady=(5,0))
+        self.num_plumes = tk.IntVar(value=0)
+        ttk.Entry(ctrl, textvariable=self.num_plumes, width=5).grid(row=1, column=bc+1, pady=(5,0))
+        ttk.Label(ctrl, text="Offset:").grid(row=1, column=bc+2, pady=(5,0))
+        self.plume_offset = tk.DoubleVar(value=0.0)
+        ttk.Entry(ctrl, textvariable=self.plume_offset, width=5).grid(row=1, column=bc+3, pady=(5,0))
+
+        # Nozzle coordinates and processing parameters 
+        # Update calibration button when number of plumes changes
+        self.num_plumes.trace_add('write', lambda *args: self._update_calib_button())
+        ttk.Label(ctrl, text="Centre X:").grid(row=1, column=bc+4, pady=(5,0))
+        ttk.Entry(ctrl, textvariable=self.coord_x, width=7).grid(row=1, column=bc+5, pady=(5,0))
+        ttk.Label(ctrl, text="Centre Y:").grid(row=1, column=bc+6, pady=(5,0))
+        ttk.Entry(ctrl, textvariable=self.coord_y, width=7).grid(row=1, column=bc+7, pady=(5,0))
+
+        self.circle_btn = ttk.Button(ctrl, text="Calibration", command=self.open_circle_selector, state=tk.DISABLED)
+        self.circle_btn.grid(row=1, column=bc+10, padx=2)
 
 
-        # Row 1: Gain/Gamma/Black/White + Apply
+
+        # Row 2: Gain/Gamma/Black/White + Apply
         for i,name in enumerate(["Gain","Gamma","Black","White"]):
             ttk.Label(ctrl, text=f"{name}:").grid(
-                row=1, column=lp['param_start_col']+i*2, pady=(5,0))
+                row=2, column=lp['param_start_col']+i*2, pady=(5,0))
             v = tk.DoubleVar(value=1.0 if name in ("Gain","Gamma") else 0.0)
             ttk.Entry(ctrl, textvariable=v, width=5).grid(
-                row=1, column=lp['param_start_col']+i*2+1, pady=(5,0))
+                row=2, column=lp['param_start_col']+i*2+1, pady=(5,0))
             self.vars[name.lower()] = v
-        ttk.Label(ctrl, text="X:").grid(row=1, column=lp['param_start_col']+8, pady=(5,0))
-        ttk.Entry(ctrl, textvariable=self.coord_x, width=5).grid(row=1, column=lp['param_start_col']+9, pady=(5,0))
-        ttk.Label(ctrl, text="Y:").grid(row=1, column=lp['param_start_col']+10, pady=(5,0))
-        ttk.Entry(ctrl, textvariable=self.coord_y, width=5).grid(row=1, column=lp['param_start_col']+11, pady=(5,0))
         self.confirm_btn = ttk.Button(ctrl, text="Apply", command=self.update_image, state=tk.DISABLED)
-        self.confirm_btn.grid(row=1, column=lp['confirm_btn'], padx=5, pady=(5,0))
+        self.confirm_btn.grid(row=2, column=lp['param_start_col']+10, padx=5, pady=(5,0))
 
-        # Row 2: Brush controls
-        bc = lp['param_start_col']
-        ttk.Label(ctrl, text="Brush:").grid(row=2, column=bc, pady=(5,0))
+
+
+
+        # Row 3: Brush controls
+        ttk.Label(ctrl, text="Brush:").grid(row=3, column=bc, pady=(5,0))
         ttk.Combobox(ctrl, textvariable=self.brush_shape, values=['circle','square'], width=10)\
-            .grid(row=2, column=bc+1, pady=(5,0))
-        ttk.Checkbutton(ctrl, text="Show Mask", variable=self.show_mask, command=self._draw_scaled).grid(row=2, column=bc+3, pady=(5,0))
-        ttk.Label(ctrl, text="Size:").grid(row=2, column=bc+4, pady=(5,0))
-        ttk.Entry(ctrl, textvariable=self.brush_size, width=5).grid(row=2, column=bc+5, pady=(5,0))
+            .grid(row=3, column=bc+1, pady=(5,0))
+        ttk.Checkbutton(ctrl, text="Show Mask", variable=self.show_mask, command=self._draw_scaled).grid(row=3, column=bc+3, pady=(5,0))
+        ttk.Label(ctrl, text="Size:").grid(row=3, column=bc+4, pady=(5,0))
+        ttk.Entry(ctrl, textvariable=self.brush_size, width=5).grid(row=3, column=bc+5, pady=(5,0))
         ttk.Button(ctrl, text="Color", command=self.choose_color)\
-            .grid(row=2, column=bc+7, padx=(10,0), pady=(5,0))
-        ttk.Label(ctrl, text="Alpha:").grid(row=2, column=bc+8, pady=(5,0))
+            .grid(row=3, column=bc+7, padx=(10,0), pady=(5,0))
+        ttk.Label(ctrl, text="Alpha:").grid(row=3, column=bc+8, pady=(5,0))
         tk.Scale(ctrl, from_=0, to=255, orient=tk.HORIZONTAL,
                  variable=self.alpha_var, length=100).grid(
-            row=2, column=bc+9, pady=(5,0), sticky='w')
+            row=3, column=bc+9, pady=(5,0), sticky='w')
         
-                # Row 3: Ring mask parameters
-        ttk.Label(ctrl, text="Inner R:").grid(row=3, column=bc, pady=(5,0))
+        # Row 4: Ring mask parameters
+        ttk.Label(ctrl, text="Inner R:").grid(row=4, column=bc, pady=(5,0))
         self.inner_radius = tk.IntVar(value=0)
-        ttk.Entry(ctrl, textvariable=self.inner_radius, width=5).grid(row=3, column=bc+1, pady=(5,0))
-        ttk.Label(ctrl, text="Outer R:").grid(row=3, column=bc+2, pady=(5,0))
+        ttk.Entry(ctrl, textvariable=self.inner_radius, width=5).grid(row=4, column=bc+1, pady=(5,0))
+        ttk.Label(ctrl, text="Outer R:").grid(row=4, column=bc+2, pady=(5,0))
         self.outer_radius = tk.IntVar(value=0)
-        ttk.Entry(ctrl, textvariable=self.outer_radius, width=5).grid(row=3, column=bc+3, pady=(5,0))
-        ttk.Button(ctrl, text="Add Ring", command=self.add_ring_mask).grid(row=3, column=bc+4, padx=(10,0), pady=(5,0))
+        ttk.Entry(ctrl, textvariable=self.outer_radius, width=5).grid(row=4, column=bc+3, pady=(5,0))
+        ttk.Button(ctrl, text="Add Ring", command=self.add_ring_mask).grid(row=4, column=bc+4, padx=(10,0), pady=(5,0))
 
-        # Row 4: Plume visualization parameters
-        ttk.Label(ctrl, text="Plumes:").grid(row=4, column=bc, pady=(5,0))
-        self.num_plumes = tk.IntVar(value=0)
-        ttk.Entry(ctrl, textvariable=self.num_plumes, width=5).grid(row=4, column=bc+1, pady=(5,0))
-        ttk.Label(ctrl, text="Offset:").grid(row=4, column=bc+2, pady=(5,0))
-        self.plume_offset = tk.DoubleVar(value=0.0)
-        ttk.Entry(ctrl, textvariable=self.plume_offset, width=5).grid(row=4, column=bc+3, pady=(5,0))
+ 
 
     def add_ring_mask(self):
         """Add a ring (or circle) mask centered at the calibration coordinate."""
@@ -512,9 +530,18 @@ class VideoAnnotatorUI:
     
 
     def open_circle_selector(self):
-        """Open a dialog to pick three points and compute a circle."""
-        if self.total_frames:
-            CircleSelector(self)
+        """Open a dialog to pick points and compute a calibration circle."""
+        if not self.total_frames:
+            return
+        n = self.num_plumes.get()
+        if n <= 0:
+            print("Set number of plumes before calibration")
+            return
+        CircleSelector(self, self.orig_img, n)
+
+    def _update_calib_button(self):
+        state = tk.NORMAL if (self.total_frames and self.num_plumes.get() > 0) else tk.DISABLED
+        self.circle_btn.config(state=state)
             
     def export_mask(self):
         """Save the current mask as .npy and .jpg"""
