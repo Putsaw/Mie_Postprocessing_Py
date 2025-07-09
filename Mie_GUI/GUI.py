@@ -528,7 +528,6 @@ class VideoAnnotatorUI:
         if self.total_frames:
             FrameSelector(self)
     
-
     def open_circle_selector(self):
         """Open a dialog to pick points and compute a calibration circle."""
         if not self.total_frames:

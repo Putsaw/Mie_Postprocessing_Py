@@ -26,6 +26,7 @@ async def play_video_cv2_async(video, gain=1, binarize=False, thresh=0.5, intv=1
     return await loop.run_in_executor(None, play_video_cv2, video, gain, binarize, thresh, intv)
 
 def MIE_pipeline(video):
+    '''
     crop = (0, 0, 768, 768)
 
     strip = rotate_and_crop(video, 20, crop, is_video=True)
@@ -44,6 +45,19 @@ def MIE_pipeline(video):
     cv2.imshow("Filtered Range Map", filtered_range_map)
     cv2.waitKey(0)      
     cv2.destroyAllWindows()
+    '''
+    foreground = subtract_median_background(video, frame_range=slice(0, 30))
+
+    gain = foreground * 5  # gain correction
+    gamma = gain ** 2 # gamma correction
+    gamma[gamma < 0.1 ] = 0  # thresholding
+    play_video_cv2(gamma, intv=17)
+    
+    centre = (384.9337805142379, 382.593916979227)
+    crop = (round(centre[0]), round(centre[1]- 768/16), round(768/2), round(768/8))
+    seg1 = rotate_and_crop(gamma, 2.4, crop, centre, is_video=True)
+    play_video_cv2(seg1, intv=17*4)
+    
 
 
 
@@ -352,7 +366,7 @@ async def main():
             else:
                 # gamma correcetion of video
                 # mie_video = mask_video(video[15:150,:,:], chamber_mask)
-                mie_video = mask_video(video, test_mask)
+                mie_video = mask_video(video, ~chamber_mask)
 
                 MIE_pipeline(mie_video)
 

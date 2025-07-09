@@ -5,12 +5,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Tuple
 
 CropRect = Tuple[int, int, int, int]  # x, y, w, h
+Coordinates = Tuple[float, float]  # x, y
 
 @lru_cache(maxsize=8)
 def make_rotation_maps(
     frame_size: Tuple[int, int],
     angle: float,
-    crop_rect: Optional[CropRect] = None
+    crop_rect: Optional[CropRect] = None,
+    rotation_center: Optional[Coordinates] = None
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Precompute map_x and map_y for cv2.remap."""
     h, w = frame_size
@@ -20,7 +22,10 @@ def make_rotation_maps(
         x0, y0, out_w, out_h = crop_rect
 
     j_coords, i_coords = np.meshgrid(np.arange(out_w), np.arange(out_h))
-    cx, cy = w / 2.0, h / 2.0
+    if rotation_center is None:
+        cx, cy = w / 2.0, h / 2.0
+    else: 
+        cx, cy = rotation_center
     abs_x = j_coords + x0
     abs_y = i_coords + y0
 
@@ -70,6 +75,7 @@ def rotate_and_crop(
     array: np.ndarray,
     angle: float,
     crop_rect: Optional[CropRect] = None,
+    rotation_center: Optional[Coordinates] = None,
     is_video: bool = False,
     max_workers: Optional[int] = None
 ) -> np.ndarray:
@@ -78,7 +84,7 @@ def rotate_and_crop(
         h, w = array.shape[1:3]
     else:
         h, w = array.shape[:2]
-    map_x, map_y = make_rotation_maps((h, w), angle, crop_rect)
+    map_x, map_y = make_rotation_maps((h, w), angle, crop_rect, rotation_center)
 
     use_cuda = False
     try:

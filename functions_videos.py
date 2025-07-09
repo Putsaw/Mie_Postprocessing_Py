@@ -1,5 +1,5 @@
 from packages import *
-
+from concurrent.futures import as_completed, ThreadPoolExecutor
 
 # -----------------------------
 # Cine video reading and playback
@@ -40,8 +40,6 @@ def get_subfolder_names(parent_folder):
     parent_folder = Path(parent_folder)
     subfolder_names = [item.name for item in parent_folder.iterdir() if item.is_dir()]
     return subfolder_names
-
-
 
 def play_video_cv2(video, gain=1, binarize=False, thresh=0.5, intv=17):
     """
@@ -100,9 +98,6 @@ def play_video_cv2(video, gain=1, binarize=False, thresh=0.5, intv=17):
 
     cv2.destroyAllWindows()
 
-
-
-
 # -----------------------------
 # Rotation and Filtering functions
 # -----------------------------
@@ -123,7 +118,6 @@ def rotate_frame(frame, angle):
     
     return rotated
 
-
 def rotate_video(video_array, angle=0, max_workers=None):
     num_frames = video_array.shape[0]
     rotated_frames = [None] * num_frames
@@ -138,12 +132,16 @@ def rotate_video(video_array, angle=0, max_workers=None):
                 print(f"Frame {idx} generated an exception during rotation: {exc}")
     return np.array(rotated_frames)
 
-
-from concurrent.futures import as_completed, ThreadPoolExecutor
-
 # -----------------------------
 # CUDA-accelerated Rotation
 # -----------------------------
+def is_opencv_cuda_available():
+    try:
+        count = cv2.cuda.getCudaEnabledDeviceCount()
+        return count > 0
+    except AttributeError:
+        return False
+    
 def rotate_frame_cuda(frame, angle, stream=None):
     """
     在 GPU 上旋转单帧图像／掩码。
@@ -192,7 +190,6 @@ def rotate_frame_cuda(frame, angle, stream=None):
         stream.waitForCompletion()
     return rotated
 
-
 def rotate_video_cuda(video_array, angle=0, max_workers=4):
     """
     并行地在 GPU 上旋转整个视频（每帧独立流）。
@@ -226,8 +223,14 @@ def rotate_video_cuda(video_array, angle=0, max_workers=4):
 
     return np.stack(rotated, axis=0)
 
-
-
+def rotate_video_auto(video_array, angle=0, max_workers=4):
+    if is_opencv_cuda_available():
+        print("Using CUDA for rotation.")
+        return rotate_video_cuda(video_array, angle=angle, max_workers=max_workers)
+    else:
+        print("CUDA not available, falling back to CPU.")
+        return rotate_video(video_array, angle=angle, max_workers=max_workers)
+    
 # -----------------------------
 # Masking and Binarization Pipeline
 # -----------------------------
@@ -239,7 +242,6 @@ def mask_video(video: np.ndarray, chamber_mask: np.ndarray) -> np.ndarray:
         chamber_mask_bool = cv2.resize(chamber_mask_bool.astype(np.uint8), (video.shape[2], video.shape[1]), interpolation=cv2.INTER_NEAREST)
         # raise ValueError("Video dimensions and mask dimensions do not match.")
     return video * chamber_mask_bool
-
 
 # -----------------------------
 # Global Threshold Binarization
@@ -258,22 +260,6 @@ def binarize_video_global_threshold(video, method='otsu', thresh_val=None):
     # Broadcasting applies the comparison element-wise across the entire video array.
     binary_video = (video >= threshold).astype(np.uint8) * 255
     return binary_video
-
-def is_opencv_cuda_available():
-    try:
-        count = cv2.cuda.getCudaEnabledDeviceCount()
-        return count > 0
-    except AttributeError:
-        return False
-    
-def rotate_video_auto(video_array, angle=0, max_workers=4):
-    if is_opencv_cuda_available():
-        print("Using CUDA for rotation.")
-        return rotate_video_cuda(video_array, angle=angle, max_workers=max_workers)
-    else:
-        print("CUDA not available, falling back to CPU.")
-        return rotate_video(video_array, angle=angle, max_workers=max_workers)
-
 
 def map_video_to_range(video):
     """
@@ -327,3 +313,29 @@ def imhist(image, bins=1000, log=False, exclude_zero=False):
     ax.set_title("Histogram of image" + (" (zeros excluded)" if exclude_zero else ""))
     ax.grid(True, which='both', ls='--', alpha=0.3)
     plt.show()
+
+def subtract_median_background(video, frame_range=None):
+    """
+    Subtract a background image from each frame of a video.
+    
+    Parameters
+    ----------
+    video : np.ndarray
+        Video frames as a 3D array (N, H, W).
+
+    Returns
+    -------
+    np.ndarray
+        Background-subtracted video.
+
+    Example usage:
+        slice object recommended in Python, 
+        foreground = subtract_median_background(video, frame_range=slice(0, 30))
+    """
+    if video.ndim != 3:
+        raise ValueError("Video must be 3D (N, H, W).")
+    if frame_range is None:
+        background = np.median(video[:, :, :], axis=0)
+    else:
+        background = np.median(video[frame_range, :, :], axis=0) 
+    return video  - background[None, :, :]
