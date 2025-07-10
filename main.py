@@ -70,9 +70,23 @@ def MIE_pipeline(video):
 
     segments = []
 
+    '''
+    # Sequential loop
     for angle in angles:
         seg = rotate_and_crop(gamma, angle, crop, centre, is_video=True)
         segments.append(seg)
+        # play_video_cv2(seg, intv=17)
+    '''
+    
+    # Loop unfolding 2x 
+    for i in range(0, angles.shape[0]-1):
+        angle1 = angles[i]
+        angle2 = angles[i+1]
+        seg1 = rotate_and_crop(gamma, angle1, crop, centre, is_video=True)
+        seg2 = rotate_and_crop(gamma, angle2, crop, centre, is_video=True)
+        segments.append(seg1)
+        segments.append(seg2)
+        
         # play_video_cv2(seg, intv=17)
 
     for seg in segments:
