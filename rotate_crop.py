@@ -74,14 +74,45 @@ def rotate_and_crop(
     crop_rect: Optional[CropRect] = None,
     rotation_center: Optional[Coordinates] = None,
     is_video: bool = False,
+    mask: Optional[np.ndarray] = None,
     max_workers: Optional[int] = None
 ) -> np.ndarray:
-    """Rotate an image or video by ``angle`` and optionally crop the result."""
+    """Rotate an image or video by ``angle`` and optionally crop the result.
+
+    Parameters
+    ----------
+    array : np.ndarray
+        Input image or video. If ``is_video`` is True this should be a
+        3-D array ``(frames, height, width)``.
+    angle : float
+        Rotation angle in degrees.
+    crop_rect : tuple, optional
+        ``(x, y, w, h)`` rectangle describing the cropped region after
+        rotation.
+    rotation_center : tuple, optional
+        ``(x, y)`` coordinates of the center of rotation.
+    is_video : bool
+        Whether ``array`` represents a video sequence.
+    mask : np.ndarray, optional
+        Boolean mask in the cropped coordinate system. Pixels outside the
+        mask are ignored during remapping.
+    max_workers : int, optional
+        Number of worker threads for video processing.
+    """
     if is_video:
         h, w = array.shape[1:3]
     else:
         h, w = array.shape[:2]
     map_x, map_y = make_rotation_maps((h, w), angle, crop_rect, rotation_center)
+
+    if mask is not None:
+        if mask.shape != map_x.shape:
+            raise ValueError("Mask size does not match output dimensions")
+        mask_bool = mask.astype(bool)
+        map_x = map_x.copy()
+        map_y = map_y.copy()
+        map_x[~mask_bool] = -1
+        map_y[~mask_bool] = -1
 
     use_cuda = False
     try:
@@ -137,4 +168,4 @@ def generate_plume_mask(inner_radius, outer_radius, w, h):
     # cv2.imshow("plume_mask", mask) # Debug
 
     # Apply mask to extract polygon region
-    return mask
+    return mask >0 

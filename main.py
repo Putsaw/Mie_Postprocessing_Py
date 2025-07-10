@@ -16,6 +16,11 @@ from scipy.signal import convolve2d
 import asyncio
 
 from rotate_crop import *
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+
+
 # Define a semaphore with a limit on concurrent tasks
 SEMAPHORE_LIMIT = 2  # Adjust this based on your CPU capacity
 semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
@@ -67,37 +72,50 @@ def MIE_pipeline(video):
 
     offset = 2
     angles = np.linspace(0, 360, number_of_plumes, endpoint=False) + offset
+    mask = generate_plume_mask(ir_, or_, crop[2], crop[3])
 
     segments = []
 
     '''
     # Sequential loop
     for angle in angles:
-        seg = rotate_and_crop(gamma, angle, crop, centre, is_video=True)
+        seg = rotate_and_crop(gamma, angle, crop, centre, is_video=True, mask=mask)
         segments.append(seg)
         # play_video_cv2(seg, intv=17)
-    '''
     
-    # Loop unfolding 2x 
+    
+
+    # Loop unfolding 2x， poor performance
     for i in range(0, angles.shape[0]-1):
         angle1 = angles[i]
         angle2 = angles[i+1]
-        seg1 = rotate_and_crop(gamma, angle1, crop, centre, is_video=True)
-        seg2 = rotate_and_crop(gamma, angle2, crop, centre, is_video=True)
+        seg1 = rotate_and_crop(gamma, angle1, crop, centre, is_video=True,
+                               mask=mask)
+        seg2 = rotate_and_crop(gamma, angle2, crop, centre, is_video=True,
+                               mask=mask)
         segments.append(seg1)
         segments.append(seg2)
         
         # play_video_cv2(seg, intv=17)
 
-    for seg in segments:
-        if 'mask' not in globals():
-            mask = generate_plume_mask(ir_, or_, seg.shape[2], seg.shape[1])> 0
-
-        seg_masked = mask_video(seg, mask) 
-
-        # play_video_cv2(seg1_masked, intv=17)
+    '''
+    with ThreadPoolExecutor(max_workers=min(len(angles), os.cpu_count() or 1)) as exe:
+        future_map = {
+            exe.submit(
+                rotate_and_crop, gamma, angle, crop, centre,
+                is_video=True, mask=mask
+            ): idx for idx, angle in enumerate(angles)
+        }
+        segments = np.array([None] * len(angles))
+        for fut in as_completed(future_map):
+            idx = future_map[fut]
+            segments[idx] = fut.result()
     
 
+    for seg in segments:
+        pass  # segments are already masked during rotation
+
+        # play_video_cv2(seg, intv=17)
 
 
 async def main():
