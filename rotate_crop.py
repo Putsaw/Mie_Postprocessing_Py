@@ -38,17 +38,15 @@ def make_rotation_maps(
 
     return src_x.astype(np.float32), src_y.astype(np.float32)
 
-
-
 def _remap_frame(frame: np.ndarray, map_x: np.ndarray, map_y: np.ndarray, use_cuda: bool) -> np.ndarray:
     if frame.dtype == np.bool_:
         tmp = frame.astype(np.uint8) * 255
         if use_cuda:
             try:
-                gpu_frame = cv2.cuda_GpuMat()
+                gpu_frame = cv2.cuda_GpuMat() # type: ignore
                 gpu_frame.upload(tmp)
-                gpu_map_x = cv2.cuda_GpuMat(); gpu_map_x.upload(map_x)
-                gpu_map_y = cv2.cuda_GpuMat(); gpu_map_y.upload(map_y)
+                gpu_map_x = cv2.cuda_GpuMat(); gpu_map_x.upload(map_x) # type: ignore
+                gpu_map_y = cv2.cuda_GpuMat(); gpu_map_y.upload(map_y) # type: ignore
                 result = cv2.cuda.remap(gpu_frame, gpu_map_x, gpu_map_y, cv2.INTER_NEAREST)
                 remapped = result.download()
             except Exception:
@@ -59,17 +57,16 @@ def _remap_frame(frame: np.ndarray, map_x: np.ndarray, map_y: np.ndarray, use_cu
     else:
         if use_cuda:
             try:
-                gpu_frame = cv2.cuda_GpuMat()
+                gpu_frame = cv2.cuda_GpuMat() # type: ignore
                 gpu_frame.upload(frame)
-                gpu_map_x = cv2.cuda_GpuMat(); gpu_map_x.upload(map_x)
-                gpu_map_y = cv2.cuda_GpuMat(); gpu_map_y.upload(map_y)
+                gpu_map_x = cv2.cuda_GpuMat(); gpu_map_x.upload(map_x) # type: ignore
+                gpu_map_y = cv2.cuda_GpuMat(); gpu_map_y.upload(map_y) # type: ignore
                 result = cv2.cuda.remap(gpu_frame, gpu_map_x, gpu_map_y, cv2.INTER_CUBIC)
                 return result.download()
             except Exception:
                 return cv2.remap(frame, map_x, map_y, interpolation=cv2.INTER_CUBIC)
         else:
             return cv2.remap(frame, map_x, map_y, interpolation=cv2.INTER_CUBIC)
-
 
 def rotate_and_crop(
     array: np.ndarray,
@@ -108,3 +105,36 @@ def rotate_and_crop(
         return np.stack(rotated, axis=0)
     else:
         return _remap_frame(array, map_x, map_y, use_cuda)
+    
+def generate_CropRect(inner_radius, outer_radius, number_of_plumes, centre_x, centre_y):
+    section_angle = 360.0/ number_of_plumes
+    half_angle_radian = section_angle / 2.0 * np.pi/180.0
+    half_width = round(outer_radius*np.sin(half_angle_radian))
+
+    x = round(centre_x + inner_radius)
+
+    y = max(0, round(centre_y - half_width))
+
+    w = round(outer_radius - inner_radius)
+
+    h = 2*half_width
+
+    return (x, y, w, h)
+
+def generate_plume_mask(inner_radius, outer_radius, w, h):
+    y1 = -h/outer_radius/2 * inner_radius + h/2
+    y2 = h/outer_radius/2 * inner_radius + h/2
+    
+    # Create blank single-channel mask of same height/width
+    mask = np.zeros((h, w), dtype=np.uint8)
+    
+    # Define polygon vertices as Nx2 integer array  
+    pts = np.array([[0, round(y2)], [0, round(y1)], [w, 0], [w, h]], dtype=np.int32)
+    
+    # Fill the polygon on the mask
+    cv2.fillPoly(mask, [pts], (255,))
+
+    # cv2.imshow("plume_mask", mask) # Debug
+
+    # Apply mask to extract polygon region
+    return mask

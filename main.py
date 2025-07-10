@@ -51,12 +51,37 @@ def MIE_pipeline(video):
     gain = foreground * 5  # gain correction
     gamma = gain ** 2 # gamma correction
     gamma[gamma < 0.1 ] = 0  # thresholding
-    play_video_cv2(gamma, intv=17)
+    # play_video_cv2(gamma, intv=17)
     
     centre = (384.9337805142379, 382.593916979227)
-    crop = (round(centre[0]), round(centre[1]- 768/16), round(768/2), round(768/8))
-    seg1 = rotate_and_crop(gamma, 2.4, crop, centre, is_video=True)
-    play_video_cv2(seg1, intv=17*4)
+    # crop = (round(centre[0]), round(centre[1]- 768/16), round(768/2), round(768/8))
+
+    ir_ = 14
+    or_ = 380
+    number_of_plumes = 10
+    centre_x = 384.9337805142379
+    centre_y = 382.593916979227
+
+    # Generate the crop rectangle based on the plume parameters
+    crop = generate_CropRect(ir_, or_, number_of_plumes, centre_x, centre_y)
+
+    offset = 2
+    angles = np.linspace(0, 360, number_of_plumes, endpoint=False) + offset
+
+    segments = []
+
+    for angle in angles:
+        seg = rotate_and_crop(gamma, angle, crop, centre, is_video=True)
+        segments.append(seg)
+        # play_video_cv2(seg, intv=17)
+
+    for seg in segments:
+        if 'mask' not in globals():
+            mask = generate_plume_mask(ir_, or_, seg.shape[2], seg.shape[1])> 0
+
+        seg_masked = mask_video(seg, mask) 
+
+        # play_video_cv2(seg1_masked, intv=17)
     
 
 
