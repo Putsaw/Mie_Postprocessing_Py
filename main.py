@@ -7,6 +7,7 @@ from rotate_crop import *
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import gc
+from ssim import compute_ssim_segments
 
 
 # Define a semaphore with a limit on concurrent tasks
@@ -20,15 +21,18 @@ async def play_video_cv2_async(video, gain=1, binarize=False, thresh=0.5, intv=1
 
 def MIE_pipeline(video):
     foreground = subtract_median_background(video, frame_range=slice(0, 30))
-    play_video_cv2(foreground, intv=17)
-    
-    gamma = foreground ** 1.3 # gamma correction
+    # play_video_cv2(foreground, intv=17)
+    '''
+    gamma = foreground ** 2 # gamma correction
     gamma[gamma < 2e-2 ] = 0  # thresholding
     gain = gamma * 5  # gain correction
     gain[gain > 1] = 1  # limit gain to 1
-    play_video_cv2(gain, intv=17)
+    # play_video_cv2(gain, intv=17)
 
     print("Gain correction has range from %f to %f" % (gain.min(), gain.max()))
+    '''
+    gain = foreground
+    gamma = foreground 
     
     centre = (384.9337805142379, 382.593916979227)
     # crop = (round(centre[0]), round(centre[1]- 768/16), round(768/2), round(768/8))
@@ -83,7 +87,18 @@ def MIE_pipeline(video):
         # pass  # segments are already masked during rotation
 
         # play_video_cv2(seg, intv=17)
+        # Launch SSIM computation asynchronously; results are not needed immediately
+    # loop = asyncio.get_running_loop()
+    # ssim_task = loop.create_task(asyncio.to_thread(compute_ssim_segments, segments,
+                                       # average_segment))
 
+    # ssim_matrix = await ssim_task    # this yields the ndarray of SSIM scores
+    ssim_matrix = compute_ssim_segments(segments,average_segment)
+    # plt.imshow(ssim_matrix, aspect='auto')
+    # plt.colorbar()
+    plt.plot(ssim_matrix.transpose())
+    
+    plt.show()
 
 
 async def main():
