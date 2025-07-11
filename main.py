@@ -1,24 +1,12 @@
-# from fill import *
-# from functions import *
 from functions_videos import *
-# from functions_optical_flow import *
-# from boundary2 import *
 import matplotlib.pyplot as plt
-
-
-
-# from std_functions3 import *
-
 import subprocess
-# from filter_video import *
 from scipy.signal import convolve2d
-
 import asyncio
-
 from rotate_crop import *
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
+import gc
 
 
 # Define a semaphore with a limit on concurrent tasks
@@ -31,32 +19,16 @@ async def play_video_cv2_async(video, gain=1, binarize=False, thresh=0.5, intv=1
     return await loop.run_in_executor(None, play_video_cv2, video, gain, binarize, thresh, intv)
 
 def MIE_pipeline(video):
-    '''
-    crop = (0, 0, 768, 768)
-
-    strip = rotate_and_crop(video, 20, crop, is_video=True)
-
-    play_video_cv2(strip, intv=17)
-
-            # mapping the video to a 2D image of its pixel intensity ranges
-    range_map = map_video_to_range(video)
-
-    imhist(range_map, log=True, exclude_zero=True)
-
-    # cv2.imshow("Range Map", range_map)
-
-    filtered_range_map = cv2.GaussianBlur(range_map, (5, 5), 0)
-            
-    cv2.imshow("Filtered Range Map", filtered_range_map)
-    cv2.waitKey(0)      
-    cv2.destroyAllWindows()
-    '''
     foreground = subtract_median_background(video, frame_range=slice(0, 30))
+    play_video_cv2(foreground, intv=17)
+    
+    gamma = foreground ** 1.3 # gamma correction
+    gamma[gamma < 2e-2 ] = 0  # thresholding
+    gain = gamma * 5  # gain correction
+    gain[gain > 1] = 1  # limit gain to 1
+    play_video_cv2(gain, intv=17)
 
-    gain = foreground * 5  # gain correction
-    gamma = gain ** 2 # gamma correction
-    gamma[gamma < 0.1 ] = 0  # thresholding
-    # play_video_cv2(gamma, intv=17)
+    print("Gain correction has range from %f to %f" % (gain.min(), gain.max()))
     
     centre = (384.9337805142379, 382.593916979227)
     # crop = (round(centre[0]), round(centre[1]- 768/16), round(768/2), round(768/8))
@@ -76,46 +48,42 @@ def MIE_pipeline(video):
 
     segments = []
 
-    '''
-    # Sequential loop
-    for angle in angles:
-        seg = rotate_and_crop(gamma, angle, crop, centre, is_video=True, mask=mask)
-        segments.append(seg)
-        # play_video_cv2(seg, intv=17)
-    
-    
-
-    # Loop unfolding 2x， poor performance
-    for i in range(0, angles.shape[0]-1):
-        angle1 = angles[i]
-        angle2 = angles[i+1]
-        seg1 = rotate_and_crop(gamma, angle1, crop, centre, is_video=True,
-                               mask=mask)
-        seg2 = rotate_and_crop(gamma, angle2, crop, centre, is_video=True,
-                               mask=mask)
-        segments.append(seg1)
-        segments.append(seg2)
-        
-        # play_video_cv2(seg, intv=17)
-
-    '''
+    # Multithreaded rotation and cropping
     with ThreadPoolExecutor(max_workers=min(len(angles), os.cpu_count() or 1)) as exe:
         future_map = {
             exe.submit(
-                rotate_and_crop, gamma, angle, crop, centre,
+                rotate_and_crop, gain, angle, crop, centre,
                 is_video=True, mask=mask
             ): idx for idx, angle in enumerate(angles)
         }
-        segments = np.array([None] * len(angles))
+        segments_with_idx = []
         for fut in as_completed(future_map):
             idx = future_map[fut]
-            segments[idx] = fut.result()
+            result = fut.result()
+            segments_with_idx.append((idx, result))
+        # Sort by index to preserve order
+        segments_with_idx.sort(key=lambda x: x[0])
+        segments = [seg for idx, seg in segments_with_idx]
     
+    # Free intermediate arrays to reduce peak memory usage
+    del foreground, gain, gamma
+    gc.collect()
 
-    for seg in segments:
-        pass  # segments are already masked during rotation
+    '''
+    # Stacking the segments into a 4D array
+    segments = [seg for seg in segments if seg is not None]
+    if not segments:
+        raise ValueError("No valid segments to stack.")
+    '''
+    segments = np.stack(segments, axis=0)
+
+    average_segment = np.mean(segments, axis=0) # Average across the segments
+
+    # for seg in segments:
+        # pass  # segments are already masked during rotation
 
         # play_video_cv2(seg, intv=17)
+
 
 
 async def main():
@@ -427,12 +395,7 @@ async def main():
 
                 MIE_pipeline(mie_video)
 
-
-
-
-
 if __name__ == '__main__':
-    
     
     from multiprocessing import freeze_support
     freeze_support()
