@@ -8,7 +8,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import gc
 from ssim import compute_ssim_segments
+import json
 
+global parent_folder
+global plumes 
+global offset
+global centre
+
+parent_folder = r"C:\Users\LJI008\OneDrive - Wärtsilä Corporation\Documents\DS300_ex"
 
 # Define a semaphore with a limit on concurrent tasks
 SEMAPHORE_LIMIT = 2  # Adjust this based on your CPU capacity
@@ -19,7 +26,7 @@ async def play_video_cv2_async(video, gain=1, binarize=False, thresh=0.5, intv=1
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, play_video_cv2, video, gain, binarize, thresh, intv)
 
-def MIE_pipeline(video):
+def MIE_pipeline(video, number_of_plumes, offset, centre):
     foreground = subtract_median_background(video, frame_range=slice(0, 30))
     # play_video_cv2(foreground, intv=17)
     '''
@@ -34,19 +41,21 @@ def MIE_pipeline(video):
     gain = foreground
     gamma = foreground 
     
-    centre = (384.9337805142379, 382.593916979227)
+    # centre = (384.9337805142379, 382.593916979227)
     # crop = (round(centre[0]), round(centre[1]- 768/16), round(768/2), round(768/8))
 
     ir_ = 14
     or_ = 380
-    number_of_plumes = 10
-    centre_x = 384.9337805142379
-    centre_y = 382.593916979227
+
+    # centre_x = 384.9337805142379
+    # centre_y = 382.593916979227
+    centre_x = float(centre[0])
+    centre_y = float(centre[1])
 
     # Generate the crop rectangle based on the plume parameters
     crop = generate_CropRect(ir_, or_, number_of_plumes, centre_x, centre_y)
 
-    offset = 2
+    # offset = 2
     angles = np.linspace(0, 360, number_of_plumes, endpoint=False) + offset
     mask = generate_plume_mask(ir_, or_, crop[2], crop[3])
 
@@ -132,9 +141,23 @@ def MIE_pipeline(video):
     
     plt.show()
 
+    labels = kmeans_label_video(video, k=3)
+    print('labels shape', labels.shape)
+    print('unique labels', np.unique(labels))
+    playable = labels_to_playable_video(labels, k=2)
+    print('playable min', playable.min(), 'max', playable.max())
+    # play_video_cv2(playable)
+    play_videos_side_by_side([video, playable], intv = 170)
+
+    playable = labels_to_playable_video(labels, k=2)
+    print('playable min', playable.min(), 'max', playable.max())
+    # play_video_cv2(playable)
+    play_videos_side_by_side([video, playable], intv = 170)
+
+    1
 
 async def main():
-    parent_folder = r"G:\Master_Thesis\BC20220627 - Heinzman DS300 - Mie Top view\Cine\Interest"
+    # parent_folder = r"G:\Master_Thesis\BC20220627 - Heinzman DS300 - Mie Top view\Cine\Interest"
     
     #parent_folder = r"E:\TP_example"
     subfolders = get_subfolder_names(parent_folder)  # Ensure get_subfolder_names is defined or imported
@@ -162,285 +185,301 @@ async def main():
     
         # Get a list of all files in the directory
         files = [file for file in directory_path.iterdir() if file.is_file()]
-    
-        print(files)
+
         for file in files:
-            print("Procssing:", file)
-            video = load_cine_video(file).astype(np.float32)/4096  # Ensure load_cine_video is defined or imported
-            frames, height, width = video.shape
-            # video = video.astype(float)
-            # play_video_cv2(video)
-            # video = video**2
+            if file.name == 'config.json':
+                with open(file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
 
-            if "Shadow" in file.name:
-                continue
+                    # process the data
+                    # for item in data:
+                        # print(item)
+                    plumes = int(data['plumes'])
+                    offset = float(data['offset'])
+                    centre = [float(data['centre_x']), float(data['centre_y'])]
 
-                # Angle of Rotation
-                rotation = 45
+        # print(files)
+        for file in files:
+            if file.suffix == '.cine':
+                print("Procssing:", file)
 
-                # Strip cutting
-                x_start = 1
-                x_end = -1
-                y_start = 150
-                y_end = -250
+                video = load_cine_video(file).astype(np.float32)/4096  # Ensure load_cine_video is defined or imported
+                frames, height, width = video.shape
+                # video = video.astype(float)
+                # play_video_cv2(video)
+                # video = video**2
 
-                
-                '''
-                start_time = time.time()
-                RT = rotate_video(video, rotation)
-                elapsed_time = time.time() - start_time
-                print(f"Rotating video with CPU finished in {elapsed_time:.2f} seconds.")
-                '''
-                
-                start_time = time.time()
-                RT = rotate_video_cuda(video, rotation)
-                elapsed_time = time.time() - start_time
-                print(f"Rotating video with GPU finished in {elapsed_time:.2f} seconds.")
-                
-                
+                if "Shadow" in file.name:
+                    continue
 
+                    # Angle of Rotation
+                    rotation = 45
 
+                    # Strip cutting
+                    x_start = 1
+                    x_end = -1
+                    y_start = 150
+                    y_end = -250
 
-                # frame, y, x
-                strip = RT[15:400, y_start:y_end, x_start:x_end]
-                strip = strip.astype(float)
-                
-                
-                masked_strip = strip
-
-                # play_video_cv2(masked_strip)
-
-                lap = np.array([[1,1,1],[1,-8,1],[1,1,1]], dtype=float)
-                
-                HP = filter_video_fft(strip, lap, mode='same')
-
-                avg = np.array([[1,1,1],[1,1,1],[1,1,1]], dtype=float)
-
-                HP_avg = filter_video_fft(HP, avg, mode='same')
-                # play_video_cv2(HP_avg)
-                await play_video_cv2_async(HP_avg)
-
-                     
-                # STD filtering
-                # parameters:
-                # Standard deviation filter window size
-                # Downsampling factor
-                # std_video = stdfilt_video(strip, std_size, pool_size)
-
-                '''                
-                std_video = stdfilt_video_parallel_optimized(masked_strip, std_size=3, pool_size=2)
-
-                bw_std = binarize_video_global_threshold(std_video, method='fixed', thresh_val=2E2)
-
-                bw_std_filled = fill_video_holes_parallel(bw_std)
-
-                '''
-
-                '''                
-                start_time = time.time()
-                velocity_field = compute_optical_flow(strip)
-                elapsed_time = time.time() - start_time
-                print(f"OFE with CPU finished in {elapsed_time:.2f} seconds.")
-                '''
-
-                HP_delay = np.zeros(HP_avg.shape, dtype=float)
-
-                HP_delay[1:-1, :, :] = HP_avg[0:-2, :,:]
-
-                HP_res = np.abs(HP_delay-HP_avg)
-                # import numpy as np
-                import cupy as cp
-                import matplotlib.pyplot as plt
-
-                # 2) Upload to GPU
-                vol_gpu = cp.array(HP_res)
-                # 3) Plan and execute 3D complex‐to‐complex FFT in place
-                #    (cuFFT automatically picks the fastest algorithm)
-                vol_fft = cp.fft.fftn(vol_gpu, axes=(0,1,2))
-
-                # 4) Shift zero‐frequency to center (optional)
-                vol_fft = cp.fft.fftshift(vol_fft, axes=(0,1,2))
-
-                # 5) Compute magnitude (abs) and bring back to CPU
-                mag_gpu = cp.abs(vol_fft)
-                mag = cp.asnumpy(mag_gpu)
-                nx, ny, nz = HP_res.shape
-                # 6) Visualize three orthogonal slices
-                fig, axes = plt.subplots(1,3, figsize=(12,4))
-                slices = [
-                    mag[nx//2, :, :],  # Y–Z at center X
-                    mag[:, ny//2, :],  # X–Z at center Y
-                    mag[:, :, nz//2],  # X–Y at center Z
-                ]
-                titles = ['Slice X=mid','Slice Y=mid','Slice Z=mid']
-                for ax, slc, title in zip(axes, slices, titles):
-                    im = ax.imshow(np.log1p(slc), origin='lower')
-                    ax.set_title(title)
-                    fig.colorbar(im, ax=ax, fraction=0.046)
-                plt.tight_layout()
-                plt.show()
-
-
-
-
-
-
-                # await play_video_cv2_async(HP_res/1024)
-
-                                
-                start_time = time.time()
-                velocity_field = compute_optical_flow_cuda(HP_res)
-                elapsed_time = time.time() - start_time
-                print(f"OFE with GPU finished in {elapsed_time:.2f} seconds.")
-
-                scalar_velocity_field = compute_flow_scalar_video(velocity_field, multiplier=1, y_scale=1)
-                
-
-                start_time = time.time()
-                scalar_velocity_field_med = median_filter_video_cuda(HP_res, 5, 5)
-                elapsed_time = time.time() - start_time
-                print(f"Medfilt with GPU finished in {elapsed_time:.2f} seconds.")
-
-                await play_video_cv2_async(scalar_velocity_field_med/1024)
-
-
-                bw_flow = mask_video(binarize_video_global_threshold(scalar_velocity_field_med, method='otsu'), chamber_mask)
-
-                await play_video_cv2_async(bw_flow, gain=255)
-    
-                
-                                
-                start_time = time.time()
-                bw_flow_filled = fill_video_holes_parallel(bw_flow)
-                elapsed_time = time.time() - start_time
-                print(f"Hole-filling with CPU finished in {elapsed_time:.2f} seconds.")
-                
-
-                start_time = time.time()
-                bw_flow_filled = fill_video_holes_gpu(bw_flow)
-                elapsed_time = time.time() - start_time
-                print(f"Hole-filling with GPU finished in {elapsed_time:.2f} seconds.")
-
-                await play_video_cv2_async(bw_flow_filled, gain=255, binarize=True)
-
-
-                # results = compute_boundaries_parallel_all(bw_flow_filled)
-                
-
-                # results = compute_boundaries_parallel_all(bw_std_filled)
-
-
-                # play_video_cv2(strip)
-                # play_video_cv2(masked_strip)
-                # play_video_cv2(bw_std, 4)
-                # play_video_cv2(std_video/1E3)
-                # masked_std_video = mask_video(std_video, chamber_mask)
-                # play_video_cv2(masked_std_video/1E3)
-                # play_video_cv2(scalar_velocity_field, 1)
-                # play_video_cv2(bw_flow_filled, 10)
-
-
-
-                # ... after computing `results = compute_boundaries_parallel_all(bw_flow)` ...
-                
-                plt.ion()
-                fig, ax = plt.subplots()
-                im = ax.imshow(masked_strip[0], cmap='gray')
-                ax.set_title("Frame 0 Boundaries")
-                ax.axis('off')
-
-                for idx, res in enumerate(results):
-                    frame = masked_strip[idx]
-                    im.set_data(frame)
-                    ax.set_title(f"Frame {idx} Boundaries")
                     
-                    # 1) Remove old contour lines
-                    #    This clears any Line2D objects currently on the axes.
-                    for ln in ax.lines:
-                        ln.remove()
+                    '''
+                    start_time = time.time()
+                    RT = rotate_video(video, rotation)
+                    elapsed_time = time.time() - start_time
+                    print(f"Rotating video with CPU finished in {elapsed_time:.2f} seconds.")
+                    '''
+                    
+                    start_time = time.time()
+                    RT = rotate_video_cuda(video, rotation)
+                    elapsed_time = time.time() - start_time
+                    print(f"Rotating video with GPU finished in {elapsed_time:.2f} seconds.")
+                    
+                    
+
+
+
+                    # frame, y, x
+                    strip = RT[15:400, y_start:y_end, x_start:x_end]
+                    strip = strip.astype(float)
+                    
+                    
+                    masked_strip = strip
+
+                    # play_video_cv2(masked_strip)
+
+                    lap = np.array([[1,1,1],[1,-8,1],[1,1,1]], dtype=float)
+                    
+                    HP = filter_video_fft(strip, lap, mode='same')
+
+                    avg = np.array([[1,1,1],[1,1,1],[1,1,1]], dtype=float)
+
+                    HP_avg = filter_video_fft(HP, avg, mode='same')
+                    # play_video_cv2(HP_avg)
+                    await play_video_cv2_async(HP_avg)
+
+                        
+                    # STD filtering
+                    # parameters:
+                    # Standard deviation filter window size
+                    # Downsampling factor
+                    # std_video = stdfilt_video(strip, std_size, pool_size)
+
+                    '''                
+                    std_video = stdfilt_video_parallel_optimized(masked_strip, std_size=3, pool_size=2)
+
+                    bw_std = binarize_video_global_threshold(std_video, method='fixed', thresh_val=2E2)
+
+                    bw_std_filled = fill_video_holes_parallel(bw_std)
 
                     '''
-                    # Plotting all countors                    
-                    # 2) Plot every contour for every component
-                    for comp in res.components:
-                        for contour in comp.boundaries:
-                            y, x = contour[:, 0], contour[:, 1]
-                            ax.plot(x, y, '-r', linewidth=2)
+
+                    '''                
+                    start_time = time.time()
+                    velocity_field = compute_optical_flow(strip)
+                    elapsed_time = time.time() - start_time
+                    print(f"OFE with CPU finished in {elapsed_time:.2f} seconds.")
+                    '''
+
+                    HP_delay = np.zeros(HP_avg.shape, dtype=float)
+
+                    HP_delay[1:-1, :, :] = HP_avg[0:-2, :,:]
+
+                    HP_res = np.abs(HP_delay-HP_avg)
+                    # import numpy as np
+                    import cupy as cp
+                    import matplotlib.pyplot as plt
+
+                    # 2) Upload to GPU
+                    vol_gpu = cp.array(HP_res)
+                    # 3) Plan and execute 3D complex‐to‐complex FFT in place
+                    #    (cuFFT automatically picks the fastest algorithm)
+                    vol_fft = cp.fft.fftn(vol_gpu, axes=(0,1,2))
+
+                    # 4) Shift zero‐frequency to center (optional)
+                    vol_fft = cp.fft.fftshift(vol_fft, axes=(0,1,2))
+
+                    # 5) Compute magnitude (abs) and bring back to CPU
+                    mag_gpu = cp.abs(vol_fft)
+                    mag = cp.asnumpy(mag_gpu)
+                    nx, ny, nz = HP_res.shape
+                    # 6) Visualize three orthogonal slices
+                    fig, axes = plt.subplots(1,3, figsize=(12,4))
+                    slices = [
+                        mag[nx//2, :, :],  # Y–Z at center X
+                        mag[:, ny//2, :],  # X–Z at center Y
+                        mag[:, :, nz//2],  # X–Y at center Z
+                    ]
+                    titles = ['Slice X=mid','Slice Y=mid','Slice Z=mid']
+                    for ax, slc, title in zip(axes, slices, titles):
+                        im = ax.imshow(np.log1p(slc), origin='lower')
+                        ax.set_title(title)
+                        fig.colorbar(im, ax=ax, fraction=0.046)
+                    plt.tight_layout()
+                    plt.show()
+
+
+
+
+
+
+                    # await play_video_cv2_async(HP_res/1024)
+
+                                    
+                    start_time = time.time()
+                    velocity_field = compute_optical_flow_cuda(HP_res)
+                    elapsed_time = time.time() - start_time
+                    print(f"OFE with GPU finished in {elapsed_time:.2f} seconds.")
+
+                    scalar_velocity_field = compute_flow_scalar_video(velocity_field, multiplier=1, y_scale=1)
                     
 
+                    start_time = time.time()
+                    scalar_velocity_field_med = median_filter_video_cuda(HP_res, 5, 5)
+                    elapsed_time = time.time() - start_time
+                    print(f"Medfilt with GPU finished in {elapsed_time:.2f} seconds.")
 
-                    # Countor of the biggest area
-                    # 2) If any components found, plot only the largest one
-                    if res.components:
-                        # Find component with max area
-                        largest_comp = max(res.components, key=lambda c: c.area)
+                    await play_video_cv2_async(scalar_velocity_field_med/1024)
+
+
+                    bw_flow = mask_video(binarize_video_global_threshold(scalar_velocity_field_med, method='otsu'), chamber_mask)
+
+                    await play_video_cv2_async(bw_flow, gain=255)
+        
+                    
+                                    
+                    start_time = time.time()
+                    bw_flow_filled = fill_video_holes_parallel(bw_flow)
+                    elapsed_time = time.time() - start_time
+                    print(f"Hole-filling with CPU finished in {elapsed_time:.2f} seconds.")
+                    
+
+                    start_time = time.time()
+                    bw_flow_filled = fill_video_holes_gpu(bw_flow)
+                    elapsed_time = time.time() - start_time
+                    print(f"Hole-filling with GPU finished in {elapsed_time:.2f} seconds.")
+
+                    await play_video_cv2_async(bw_flow_filled, gain=255, binarize=True)
+
+
+                    # results = compute_boundaries_parallel_all(bw_flow_filled)
+                    
+
+                    # results = compute_boundaries_parallel_all(bw_std_filled)
+
+
+                    # play_video_cv2(strip)
+                    # play_video_cv2(masked_strip)
+                    # play_video_cv2(bw_std, 4)
+                    # play_video_cv2(std_video/1E3)
+                    # masked_std_video = mask_video(std_video, chamber_mask)
+                    # play_video_cv2(masked_std_video/1E3)
+                    # play_video_cv2(scalar_velocity_field, 1)
+                    # play_video_cv2(bw_flow_filled, 10)
+
+
+
+                    # ... after computing `results = compute_boundaries_parallel_all(bw_flow)` ...
+                    
+                    plt.ion()
+                    fig, ax = plt.subplots()
+                    im = ax.imshow(masked_strip[0], cmap='gray')
+                    ax.set_title("Frame 0 Boundaries")
+                    ax.axis('off')
+
+                    for idx, res in enumerate(results):
+                        frame = masked_strip[idx]
+                        im.set_data(frame)
+                        ax.set_title(f"Frame {idx} Boundaries")
                         
-                        # Plot its first contour (there may be multiple loops)
-                        if largest_comp.boundaries:
-                            contour = largest_comp.boundaries[0]
-                            y, x = contour[:, 0], contour[:, 1]
+                        # 1) Remove old contour lines
+                        #    This clears any Line2D objects currently on the axes.
+                        for ln in ax.lines:
+                            ln.remove()
+
+                        '''
+                        # Plotting all countors                    
+                        # 2) Plot every contour for every component
+                        for comp in res.components:
+                            for contour in comp.boundaries:
+                                y, x = contour[:, 0], contour[:, 1]
+                                ax.plot(x, y, '-r', linewidth=2)
+                        
+
+
+                        # Countor of the biggest area
+                        # 2) If any components found, plot only the largest one
+                        if res.components:
+                            # Find component with max area
+                            largest_comp = max(res.components, key=lambda c: c.area)
+                            
+                            # Plot its first contour (there may be multiple loops)
+                            if largest_comp.boundaries:
+                                contour = largest_comp.boundaries[0]
+                                y, x = contour[:, 0], contour[:, 1]
+                                ax.plot(x, y, '-r', linewidth=2)
+                    '''
+                        # Longest contour
+                        # 2) Find the single longest contour across all components
+                        longest_contour = None
+                        max_len = 0
+                        for comp in res.components:
+                            for contour in comp.boundaries:
+                                n_pts = contour.shape[0]
+                                if n_pts > max_len:
+                                    max_len = n_pts
+                                    longest_contour = contour
+                        if longest_contour is not None:
+                            y, x = longest_contour[:, 0], longest_contour[:, 1]
                             ax.plot(x, y, '-r', linewidth=2)
-                '''
-                    # Longest contour
-                    # 2) Find the single longest contour across all components
-                    longest_contour = None
-                    max_len = 0
-                    for comp in res.components:
-                        for contour in comp.boundaries:
-                            n_pts = contour.shape[0]
-                            if n_pts > max_len:
-                                max_len = n_pts
-                                longest_contour = contour
-                    if longest_contour is not None:
-                        y, x = longest_contour[:, 0], longest_contour[:, 1]
-                        ax.plot(x, y, '-r', linewidth=2)
 
-                    # 3) Redraw
-                    fig.canvas.draw_idle()
-                    fig.canvas.flush_events()
-                    plt.pause(0.1)
-                plt.close('all')
-            elif "OH" in file.name:
+                        # 3) Redraw
+                        fig.canvas.draw_idle()
+                        fig.canvas.flush_events()
+                        plt.pause(0.1)
+                    plt.close('all')
+                elif "OH" in file.name:
 
-                continue
+                    continue
 
-                RT = rotate_video(video, -45)
-                strip = RT[0:150, 250:550, :]
-                LP_filtered = Gaussian_LP_video(strip, 40)
-                med = median_filter_video(LP_filtered, 5, 5)
-                
+                    RT = rotate_video(video, -45)
+                    strip = RT[0:150, 250:550, :]
+                    LP_filtered = Gaussian_LP_video(strip, 40)
+                    med = median_filter_video(LP_filtered, 5, 5)
+                    
 
-                BW = binarize_video_global_threshold(med,"fixed", 800)
+                    BW = binarize_video_global_threshold(med,"fixed", 800)
 
-                play_video_cv2(strip*10)
-                play_video_cv2(BW*255.0)
+                    play_video_cv2(strip*10)
+                    play_video_cv2(BW*255.0)
 
-                TD_map = calculate_TD_map(strip)
-                area = calculate_bw_area(BW)
-                
-                '''
-                plt.figure()
-                plt.imshow(TD_map, cmap='jet', aspect='auto')
-                plt.title("Average Time–Distance Map")
-                plt.xlabel("Time (frames)")
-                plt.ylabel("Distance (pixels)")
-                plt.colorbar(label="Sum Intensity")
-                plt.show()
+                    TD_map = calculate_TD_map(strip)
+                    area = calculate_bw_area(BW)
+                    
+                    '''
+                    plt.figure()
+                    plt.imshow(TD_map, cmap='jet', aspect='auto')
+                    plt.title("Average Time–Distance Map")
+                    plt.xlabel("Time (frames)")
+                    plt.ylabel("Distance (pixels)")
+                    plt.colorbar(label="Sum Intensity")
+                    plt.show()
 
-                plt.figure(figsize=(10, 4))
-                plt.plot(area, color='blue')
-                plt.xlabel("Frame")
-                plt.ylabel("Area (white pixels)")
-                plt.title("Area Over Time")
-                plt.grid(True)
-                plt.tight_layout()
-                plt.show()'''
-            else:
-                # gamma correcetion of video
-                # mie_video = mask_video(video[15:150,:,:], chamber_mask)
-                mie_video = mask_video(video, ~chamber_mask)
+                    plt.figure(figsize=(10, 4))
+                    plt.plot(area, color='blue')
+                    plt.xlabel("Frame")
+                    plt.ylabel("Area (white pixels)")
+                    plt.title("Area Over Time")
+                    plt.grid(True)
+                    plt.tight_layout()
+                    plt.show()'''
+                else:
+                    
+                    # gamma correcetion of video
+                    # mie_video = mask_video(video[15:150,:,:], chamber_mask)
+                    mie_video = mask_video(video, ~chamber_mask)
 
-                MIE_pipeline(mie_video)
+                    MIE_pipeline(mie_video, plumes, offset, centre)
+                    
 
 if __name__ == '__main__':
     

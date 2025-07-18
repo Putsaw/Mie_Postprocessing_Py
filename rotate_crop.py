@@ -12,7 +12,8 @@ def make_rotation_maps(
     frame_size: Tuple[int, int],
     angle: float,
     crop_rect: Optional[CropRect] = None,
-    rotation_center: Optional[Coordinates] = None
+    # rotation_center: Optional[Coordinates] = None
+    rotation_center = None
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Precompute map_x and map_y for cv2.remap."""
     h, w = frame_size
@@ -72,7 +73,8 @@ def rotate_and_crop(
     array: np.ndarray,
     angle: float,
     crop_rect: Optional[CropRect] = None,
-    rotation_center: Optional[Coordinates] = None,
+    # rotation_center: Optional[Coordinates] = None,
+    rotation_center = None,
     is_video: bool = False,
     mask: Optional[np.ndarray] = None,
     max_workers: Optional[int] = None
@@ -103,6 +105,8 @@ def rotate_and_crop(
         h, w = array.shape[1:3]
     else:
         h, w = array.shape[:2]
+
+    
     map_x, map_y = make_rotation_maps((h, w), angle, crop_rect, rotation_center)
 
     if mask is not None:

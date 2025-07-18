@@ -1,5 +1,6 @@
 from packages import *
 from concurrent.futures import as_completed, ThreadPoolExecutor
+import sklearn.cluster
 
 # -----------------------------
 # Cine video reading and playback
@@ -97,6 +98,47 @@ def play_video_cv2(video, gain=1, binarize=False, thresh=0.5, intv=17):
             break
 
     cv2.destroyAllWindows()
+
+def play_videos_side_by_side(videos, gain=1, binarize=False, thresh=0.5, intv=17):
+    """Play multiple videos side by side using OpenCV.
+
+    Parameters
+    ----------
+    videos : sequence of np.ndarray
+        Sequence of videos, each shaped ``(frame, x, y)``.
+    gain, binarize, thresh, intv : see :func:`play_video_cv2`.
+    """
+    if not videos:
+        return
+
+    total_frames = min(len(v) for v in videos)
+    if total_frames == 0:
+        return
+
+    for i in range(total_frames):
+        frame = np.hstack([v[i] for v in videos])
+
+        if binarize:
+            if frame.dtype != bool:
+                frame_bool = frame > thresh
+            else:
+                frame_bool = frame
+            frame_uint8 = frame_bool.astype(np.uint8) * 255
+        else:
+            dtype = frame.dtype
+            if np.issubdtype(dtype, np.integer):
+                frame_uint8 = gain * (frame / 16).astype(np.uint8)
+            elif np.issubdtype(dtype, np.floating):
+                frame_uint8 = np.clip(gain * (frame * 255), 0, 255).astype(np.uint8)
+            else:
+                frame_uint8 = gain * (frame / 16).astype(np.uint8)
+
+        cv2.imshow('Frame', frame_uint8)
+        if cv2.waitKey(intv) & 0xFF == ord('q'):
+            break
+
+    cv2.destroyAllWindows()
+
 
 # -----------------------------
 # Rotation and Filtering functions
@@ -339,3 +381,41 @@ def subtract_median_background(video, frame_range=None):
     else:
         background = np.median(video[frame_range, :, :], axis=0) 
     return video  - background[None, :, :]
+
+
+def kmeans_label_video(video: np.ndarray, k: int) -> np.ndarray:
+    """Label pixels into ``k`` brightness clusters using k-means.
+
+    Parameters
+    ----------
+    video:
+        Input video with shape ``(frame, x, y)``.
+    k:
+        Number of clusters.
+
+    Returns
+    -------
+    np.ndarray
+        Video of integer labels with the same shape as ``video``.
+    """
+    orig_shape = video.shape
+    flat = video.reshape(-1, 1).astype(float)
+
+    kmeans = sklearn.cluster.KMeans(n_clusters=k, n_init='auto', random_state=0)
+    kmeans.fit(flat)
+
+    centers = kmeans.cluster_centers_.ravel()
+    order = np.argsort(centers)
+
+    mapping = np.empty_like(order)
+    mapping[order] = np.arange(k)
+    labels = mapping[kmeans.labels_]
+
+    return labels.reshape(orig_shape)
+
+
+def labels_to_playable_video(labels: np.ndarray, k: int) -> np.ndarray:
+    """Convert k-means labels to a float video in ``[0, 1]`` for display."""
+    if k <= 1:
+        return labels.astype(float)
+    return labels.astype(float) / float(k - 1)
