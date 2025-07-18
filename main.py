@@ -92,6 +92,38 @@ def MIE_pipeline(video):
     # ssim_task = loop.create_task(asyncio.to_thread(compute_ssim_segments, segments,
                                        # average_segment))
 
+
+    play_video_cv2(video, intv=17)
+    total_frames = len(video)
+    binary_video = []
+    for i in range(total_frames):
+        frame = video[i]
+
+        # Apply Gaussian Blur
+        blur = cv2.GaussianBlur(frame, (5, 5), 0)
+
+        # Otsu's binarization requires 8 or 16 bit data
+        blur_8bit = cv2.normalize(blur, None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
+        
+        # Normalize to 16-bit range
+        image_16bit = cv2.normalize(blur, None, 0, 65535, cv2.NORM_MINMAX).astype('uint16')
+
+        # Apply Otsu's Binarization
+        _, binary8bit = cv2.threshold(blur_8bit, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, binary16bit = cv2.threshold(image_16bit, 0, 65535, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        # Show before and after
+        cv2.imshow('Original Frame', frame)
+        cv2.imshow('Binarized Frame', binary16bit)
+        cv2.waitKey(200)
+
+        binary_video.append(binary16bit)
+
+    
+    cv2.destroyAllWindows()
+
+    #play_video_cv2(binary_video, intv=100)
+
     # ssim_matrix = await ssim_task    # this yields the ndarray of SSIM scores
     ssim_matrix = compute_ssim_segments(segments,average_segment)
     # plt.imshow(ssim_matrix, aspect='auto')
